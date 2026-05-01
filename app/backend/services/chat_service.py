@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.backend.agent.orchestrator import classify, build_system_prompt
 from app.backend.agent.llm_router import chat_stream
 from app.backend.models.conversation import Conversation, Message
+
+logger = logging.getLogger(__name__)
 
 
 async def stream_chat(
@@ -57,42 +60,54 @@ async def stream_chat(
         for msg in reversed(recent)
     ]
 
-    # 1. LangGraph 意图分类
-    intent, task_type = await classify(user_input)
-
-    # 2. 组装系统提示词
-    user_profile = await _load_user_profile(db, user_id)
-    system = build_system_prompt(user_profile, intent)
-    messages = [{"role": "system", "content": system}] + history_messages + [
-        {"role": "user", "content": user_input}
-    ]
-
-    # 3. 保存用户消息（先落库，流中断不丢）
-    db.add(Message(
+    # 1. 先持久化用户消息，避免后续分类/生成失败时整条输入丢失
+    user_message = Message(
         conversation_id=conv.conversation_id,
         role="user",
         content=user_input,
-        intent=intent,
-    ))
-    await db.flush()
+    )
 
-    # 4. 真流式生成
-    full_content = ""
-    async for token in chat_stream(task_type, messages):
-        full_content += token
-        yield _sse_token(token, conv.conversation_id)
+    try:
+        db.add(user_message)
+        conv.message_count = (conv.message_count or 0) + 1
+        conv.last_message_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception:
+        logger.exception("保存用户消息失败: conversation_id=%s", conv.conversation_id)
+        await db.rollback()
+        yield _sse_error("消息保存失败，请稍后重试")
+        return
 
-    # 5. 保存 AI 回复
-    db.add(Message(
-        conversation_id=conv.conversation_id,
-        role="assistant",
-        content=full_content,
-        intent=intent,
-    ))
+    # 2. 意图分类 + 流式生成 + 保存 AI 回复
+    try:
+        intent, task_type = await classify(user_input)
+        user_message.intent = intent
 
-    conv.message_count = (conv.message_count or 0) + 2
-    conv.last_message_at = datetime.now(timezone.utc)
-    await db.flush()
+        user_profile = await _load_user_profile(db, user_id)
+        system = build_system_prompt(user_profile, intent)
+        messages = [{"role": "system", "content": system}] + history_messages + [
+            {"role": "user", "content": user_input}
+        ]
+
+        full_content = ""
+        async for token in chat_stream(task_type, messages):
+            full_content += token
+            yield _sse_token(token, conv.conversation_id)
+
+        db.add(Message(
+            conversation_id=conv.conversation_id,
+            role="assistant",
+            content=full_content,
+            intent=intent,
+        ))
+        conv.message_count = (conv.message_count or 0) + 1
+        conv.last_message_at = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception:
+        logger.exception("生成或保存 AI 回复失败: conversation_id=%s", conv.conversation_id)
+        await db.rollback()
+        yield _sse_error("生成回复失败，请稍后重试")
+        return
 
     yield _sse_done(conv.conversation_id)
 

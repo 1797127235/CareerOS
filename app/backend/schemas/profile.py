@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class SkillItem(BaseModel):
     name: str
     level: str = "familiar"  # beginner | familiar | intermediate | advanced
+    context: str | None = None  # 使用场景，如"课程项目用过"、"竞赛主力语言"
 
 
 # ── 画像响应 ──
@@ -24,6 +25,10 @@ class ProfileResponse(BaseModel):
     target_direction: str | None = None  # 后端 | 前端 | 算法 | AI | 测试 | 运维 | ...
     target_company_level: str | None = None  # top | major | medium | state_owned
     current_skills: list[SkillItem] | None = None
+    # 教育详情（从 profile_data["education"] 合并而来）
+    gpa: str | None = None  # 如 "3.8/4.0"
+    ranking: str | None = None  # 如 "前10%"
+    awards: list[str] | None = None  # 获奖列表
 
 
 # ── 简历上传响应 ──
@@ -45,3 +50,7 @@ class ProfileUpdate(BaseModel):
     target_direction: str | None = None
     target_company_level: str | None = None
     current_skills: list[SkillItem] | None = None
+    # 教育详情（写入 profile_data["education"]）
+    gpa: str | None = None
+    ranking: str | None = None
+    awards: list[str] | None = None

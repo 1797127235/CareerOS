@@ -54,6 +54,9 @@ class UserProfile(Base):
         String(20)
     )  # top | major | medium | state_owned
     current_skills: Mapped[dict | None] = mapped_column(JSON)
+    # 扩展画像数据(教育详情/技能场景/...) — 双写存放,不迁移已有列
+    # 结构: {"education": {"gpa", "ranking", "awards"[]}, "skills_context": {name: context}}
+    profile_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     available_time_daily: Mapped[int | None] = mapped_column()
     personality_tags: Mapped[dict | None] = mapped_column(JSON)
     learning_style: Mapped[str | None] = mapped_column(

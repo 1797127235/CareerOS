@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 
 from fastapi import UploadFile, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.agent.llm_router import chat as llm_chat
@@ -86,7 +86,11 @@ _PROFILE_EXTRACT_PROMPT = """你是一个简历解析器。从以下简历文本
 6. **grade**：从毕业年份推断 → "freshman"(大一) / "sophomore"(大二) / "junior"(大三) / "senior"(大四) / "graduate1"~"graduate3"(研一~研三)。如果已毕业，根据毕业年份距今年数填 "graduate" 级别
 7. **target_direction**：从技能栈和项目推断目标方向 → "后端" / "前端" / "算法" / "AI" / "测试" / "运维" / "安全" / "客户端" / "数据" / "嵌入式" / "其他"
 8. **target_company_level**：从实习/项目经历推断目标公司级别 → "top"(大厂) / "major"(中厂) / "medium"(小厂) / "state_owned"(国企)。有顶级实习填 "top"，无则按项目质量判断
-9. **current_skills**：技能列表，每个技能含 name 和 level（"beginner"/"familiar"/"intermediate"/"advanced"），从项目描述判断 level
+9. **current_skills**：技能列表，每项含 `name`、`level`（"beginner"/"familiar"/"intermediate"/"advanced"）、`context`（使用场景一句话，如"课程项目用过"/"竞赛主力语言"/"实习中常用"，无则 null）。从项目描述判断 level 和 context。
+10. **education**：教育详情对象，含：
+    - `gpa`：如 "3.8/4.0"，没有则 null
+    - `ranking`：如 "前10%"，没有则 null
+    - `awards`：获奖字符串列表，如 ["国家奖学金", "ACM 银牌"]，没有则 []
 
 要求：
 - 只输出 JSON，不要解释
@@ -161,6 +165,7 @@ async def _save_profile(db: AsyncSession, user_id: str, data: dict) -> ProfileRe
     _set_if_exists(profile, "target_direction", _map_direction(data.get("target_direction")))
     _set_if_exists(profile, "target_company_level", data.get("target_company_level"))
 
+    skills_context: dict[str, str] = {}
     skills = data.get("current_skills")
     if skills:
         # 标准化为 [{"skill": name, "level": level}, ...]
@@ -170,11 +175,33 @@ async def _save_profile(db: AsyncSession, user_id: str, data: dict) -> ProfileRe
                 if isinstance(s, str):
                     normalized.append({"skill": s, "level": "familiar"})
                 elif isinstance(s, dict):
+                    name = s.get("name") or s.get("skill") or ""
                     normalized.append({
-                        "skill": s.get("name", s.get("skill", "")),
+                        "skill": name,
                         "level": s.get("level", "familiar"),
                     })
+                    ctx = s.get("context")
+                    if name and ctx:
+                        skills_context[name] = ctx
             profile.current_skills = normalized
+
+    # 双写：扩展画像数据 → profile_data JSON,不动 ORM 列
+    pdata = dict(profile.profile_data or {})
+    edu = data.get("education") if isinstance(data.get("education"), dict) else None
+    if edu:
+        edu_clean: dict = {}
+        if edu.get("gpa"):
+            edu_clean["gpa"] = edu["gpa"]
+        if edu.get("ranking"):
+            edu_clean["ranking"] = edu["ranking"]
+        awards = edu.get("awards")
+        if isinstance(awards, list) and awards:
+            edu_clean["awards"] = [str(a) for a in awards if a]
+        if edu_clean:
+            pdata["education"] = {**(pdata.get("education") or {}), **edu_clean}
+    if skills_context:
+        pdata["skills_context"] = {**(pdata.get("skills_context") or {}), **skills_context}
+    profile.profile_data = pdata
 
     await db.flush()
     return _profile_to_response(profile, data.get("name"))
@@ -226,27 +253,60 @@ async def update_profile(
         profile = UserProfile(user_id=user_id)
         db.add(profile)
 
-    patch_data = patch.model_dump(exclude_unset=True)
-    skills = patch_data.pop("current_skills", None)
-    nickname = patch_data.pop("nickname", None)
+    set_fields = patch.model_fields_set
+    # 这些字段不直接映射 ORM 列
+    indirect = {"current_skills", "nickname", "gpa", "ranking", "awards"}
+    patch_data = patch.model_dump(exclude_unset=True, exclude=indirect)
 
     for key, value in patch_data.items():
-        if value is not None:
-            setattr(profile, key, value)
+        # exclude_unset 已过滤未传字段，此处 value=None 表示用户主动清空
+        setattr(profile, key, value)
 
-    if skills is not None:
+    pdata = dict(profile.profile_data or {})
+
+    if "current_skills" in set_fields:
+        skills = patch.current_skills or []
         profile.current_skills = [
             {"skill": s.name, "level": s.level} for s in skills
         ]
+        skills_ctx = {s.name: s.context for s in skills if s.context}
+        if skills_ctx:
+            pdata["skills_context"] = skills_ctx
+        else:
+            pdata.pop("skills_context", None)
 
-    if nickname is not None:
+    edu_keys = {"gpa", "ranking", "awards"} & set_fields
+    if edu_keys:
+        edu = dict(pdata.get("education") or {})
+        for k in edu_keys:
+            v = getattr(patch, k)
+            if v is None or (k == "awards" and not v):
+                edu.pop(k, None)
+            else:
+                edu[k] = v
+        if edu:
+            pdata["education"] = edu
+        else:
+            pdata.pop("education", None)
+
+    profile.profile_data = pdata
+
+    if "nickname" in set_fields:
         user = await db.get(User, user_id)
         if user:
-            user.nickname = nickname
+            user.nickname = patch.nickname
 
     await db.flush()
     user = await db.get(User, user_id)
     return _profile_to_response(profile, user.nickname if user else None)
+
+
+async def reset_profile(db: AsyncSession, user_id: str) -> ProfileResponse:
+    """清空用户画像 — 删 UserProfile 行,保留 User 行与 nickname"""
+    await db.execute(delete(UserProfile).where(UserProfile.user_id == user_id))
+    await db.flush()
+    user = await db.get(User, user_id)
+    return ProfileResponse(nickname=user.nickname if user else None)
 
 
 def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> ProfileResponse:
@@ -254,15 +314,23 @@ def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> P
     if profile is None:
         return ProfileResponse(nickname=nickname)
 
+    pdata = profile.profile_data or {}
+    skills_ctx = pdata.get("skills_context") or {}
+    edu = pdata.get("education") or {}
+
     raw_skills = profile.current_skills or []
     skills = []
     if isinstance(raw_skills, list):
         for s in raw_skills:
             if isinstance(s, dict):
+                name = s.get("skill") or s.get("name") or ""
                 skills.append(SkillItem(
-                    name=s.get("skill", s.get("name", "")),
+                    name=name,
                     level=s.get("level", "familiar"),
+                    context=skills_ctx.get(name) if name else None,
                 ))
+
+    awards = edu.get("awards") if isinstance(edu.get("awards"), list) else None
 
     return ProfileResponse(
         nickname=nickname,
@@ -274,6 +342,9 @@ def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> P
         target_direction=profile.target_direction,
         target_company_level=profile.target_company_level,
         current_skills=skills if skills else None,
+        gpa=edu.get("gpa"),
+        ranking=edu.get("ranking"),
+        awards=awards if awards else None,
     )
 
 

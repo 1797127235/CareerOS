@@ -16,6 +16,7 @@ from app.backend.schemas.profile import (
 from app.backend.services.profile_service import (
     get_profile,
     process_resume,
+    reset_profile,
     update_profile,
 )
 
@@ -69,3 +70,18 @@ async def patch_my_profile(
     except Exception:
         logger.exception("更新画像失败: user_id=%s", user_id)
         raise HTTPException(status_code=500, detail="更新画像失败")
+
+
+@router.delete("/me", response_model=ProfileResponse)
+async def reset_my_profile(
+    user_id: str = Query("demo_user"),
+    db: AsyncSession = Depends(get_db),
+):
+    """清空用户画像 — 删 UserProfile 行,保留 User 行与 nickname"""
+    try:
+        return await reset_profile(db, user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("重置画像失败: user_id=%s", user_id)
+        raise HTTPException(status_code=500, detail="重置画像失败")

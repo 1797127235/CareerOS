@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 
 import {
   getProfile,
   patchProfile,
+  resetProfile,
   uploadResume,
   type Profile,
   type SkillItem,
@@ -76,6 +77,11 @@ export default function ProfilePage() {
     setProfile(next)
   }
 
+  async function handleReset() {
+    const next = await resetProfile()
+    setProfile(next)
+  }
+
   if (loading) {
     return (
       <div className="mx-auto max-w-[720px] px-md py-2xl">
@@ -90,7 +96,7 @@ export default function ProfilePage() {
         <FilledProfile
           profile={profile!}
           onPatch={handlePatch}
-          onReupload={handleUpload}
+          onReset={handleReset}
         />
       ) : (
         <EmptyState onUpload={handleUpload} />
@@ -106,7 +112,7 @@ function EmptyState({ onUpload }: { onUpload: (f: File) => Promise<void> }) {
         <h2 className="text-2xl">先扔一份简历给我.</h2>
         <p className="text-text-muted text-base mt-xs">我看看你现在在哪一格.</p>
       </header>
-      <UploadZone mode="full" onUpload={onUpload} />
+      <UploadZone onUpload={onUpload} />
     </div>
   )
 }
@@ -114,22 +120,25 @@ function EmptyState({ onUpload }: { onUpload: (f: File) => Promise<void> }) {
 function FilledProfile({
   profile,
   onPatch,
-  onReupload,
+  onReset,
 }: {
   profile: Profile
   onPatch: (p: Partial<Profile>) => Promise<void>
-  onReupload: (f: File) => Promise<void>
+  onReset: () => Promise<void>
 }) {
   return (
     <div className="flex flex-col gap-xl ink-fade-in">
-      <header>
-        <h2 className="text-2xl">这是你现在的样子.</h2>
-        <p className="text-text-muted text-base mt-xs">从你上传的简历里读出来的.</p>
+      <header className="flex items-start justify-between gap-md">
+        <div>
+          <h2 className="text-2xl">这是你现在的样子.</h2>
+          <p className="text-text-muted text-base mt-xs">从你上传的简历里读出来的.</p>
+        </div>
+        <ResetButton onReset={onReset} />
       </header>
 
       <Divider />
 
-      <Section caption="学校 / 专业">
+      <Section caption="教育背景">
         <EditableLine
           value={profile.school_name}
           display={profile.school_name || '学校 —'}
@@ -202,6 +211,40 @@ function FilledProfile({
             />
           )}
         />
+        <EditableLine
+          muted
+          value={profile.gpa}
+          display={profile.gpa ? `GPA · ${profile.gpa}` : 'GPA —'}
+          onSave={(v) => onPatch({ gpa: v || null })}
+          renderInput={(v, set) => (
+            <input
+              autoFocus
+              value={v}
+              onChange={(e) => set(e.target.value)}
+              placeholder="3.8/4.0"
+              className="w-32 text-base border-b border-border-soft focus:border-ink py-2xs"
+            />
+          )}
+        />
+        <EditableLine
+          muted
+          value={profile.ranking}
+          display={profile.ranking ? `排名 · ${profile.ranking}` : '排名 —'}
+          onSave={(v) => onPatch({ ranking: v || null })}
+          renderInput={(v, set) => (
+            <input
+              autoFocus
+              value={v}
+              onChange={(e) => set(e.target.value)}
+              placeholder="前10%"
+              className="w-32 text-base border-b border-border-soft focus:border-ink py-2xs"
+            />
+          )}
+        />
+        <AwardList
+          awards={profile.awards ?? []}
+          onChange={(awards) => onPatch({ awards: awards.length ? awards : null })}
+        />
       </Section>
 
       <Section caption="目标方向">
@@ -240,16 +283,51 @@ function FilledProfile({
           onChange={(skills) => onPatch({ current_skills: skills })}
         />
       </Section>
-
-      <Divider />
-
-      <UploadZone mode="compact" onUpload={onReupload} />
     </div>
   )
 }
 
 function Divider() {
   return <div className="h-px w-full bg-border-soft" />
+}
+
+function ResetButton({ onReset }: { onReset: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!confirming) return
+    const t = window.setTimeout(() => setConfirming(false), 3000)
+    return () => window.clearTimeout(t)
+  }, [confirming])
+
+  async function handleClick() {
+    if (busy) return
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
+    setBusy(true)
+    try {
+      await onReset()
+    } catch {
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={busy}
+      className={[
+        'text-xs whitespace-nowrap transition-colors shrink-0 mt-xs',
+        confirming ? 'text-danger' : 'text-text-subtle hover:text-ink',
+      ].join(' ')}
+    >
+      {busy ? '正在清空...' : confirming ? '确定清空? 不可恢复' : '重新开始'}
+    </button>
+  )
 }
 
 function Section({
@@ -380,6 +458,75 @@ function SelectInput({
   )
 }
 
+function AwardList({
+  awards,
+  onChange,
+}: {
+  awards: string[]
+  onChange: (a: string[]) => Promise<void> | void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [text, setText] = useState('')
+
+  async function add() {
+    const t = text.trim()
+    if (!t) return
+    await onChange([...awards, t])
+    setText('')
+    setAdding(false)
+  }
+  async function remove(idx: number) {
+    await onChange(awards.filter((_, i) => i !== idx))
+  }
+  function onKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      add()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setAdding(false)
+      setText('')
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2xs mt-xs">
+      {awards.map((a, i) => (
+        <div key={i} className="group flex items-baseline gap-md">
+          <div className="text-base flex-1">
+            <span className="text-text-subtle">·</span> {a}
+          </div>
+          <button
+            onClick={() => remove(i)}
+            className="text-xs text-text-subtle opacity-0 group-hover:opacity-100 transition-opacity hover:text-danger"
+          >
+            划掉
+          </button>
+        </div>
+      ))}
+      {adding ? (
+        <div className="flex flex-col gap-2xs" onKeyDown={onKeyDown}>
+          <input
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="写一项获奖"
+            className="w-full text-base border-b border-border-soft focus:border-ink py-2xs"
+          />
+          <p className="text-xs text-text-subtle">Enter 记下来 · Esc 再想想</p>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="text-base text-ink hover:text-ink-deep self-start"
+        >
+          + 写写获奖
+        </button>
+      )}
+    </div>
+  )
+}
+
 function SkillList({
   skills,
   onChange,
@@ -407,6 +554,10 @@ function SkillList({
     const next = skills.map((s, i) => (i === idx ? { ...s, level: lv } : s))
     await onChange(next)
   }
+  async function changeContext(idx: number, ctx: string | null) {
+    const next = skills.map((s, i) => (i === idx ? { ...s, context: ctx } : s))
+    await onChange(next)
+  }
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -425,6 +576,7 @@ function SkillList({
           key={`${s.name}-${i}`}
           skill={s}
           onLevel={(lv) => changeLevel(i, lv)}
+          onContext={(ctx) => changeContext(i, ctx)}
           onRemove={() => remove(i)}
         />
       ))}
@@ -458,13 +610,18 @@ function SkillList({
 function SkillRow({
   skill,
   onLevel,
+  onContext,
   onRemove,
 }: {
   skill: SkillItem
   onLevel: (lv: string) => void
+  onContext: (ctx: string | null) => void
   onRemove: () => void
 }) {
   const [editing, setEditing] = useState(false)
+  const [editingContext, setEditingContext] = useState(false)
+  const [ctxDraft, setCtxDraft] = useState(skill.context ?? '')
+
   if (editing) {
     return (
       <div className="flex items-center gap-md">
@@ -487,17 +644,82 @@ function SkillRow({
       </div>
     )
   }
+
+  if (editingContext) {
+    function commitCtx() {
+      const trimmed = ctxDraft.trim()
+      onContext(trimmed ? trimmed : null)
+      setEditingContext(false)
+    }
+    return (
+      <div className="flex items-center gap-md">
+        <span className="text-base">{skill.name}</span>
+        <span className="text-text-subtle">·</span>
+        <span className="text-text-muted">{labelOf(SKILL_LEVEL, skill.level)}</span>
+        <span className="text-text-subtle">·</span>
+        <input
+          autoFocus
+          value={ctxDraft}
+          onChange={(e) => setCtxDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitCtx()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setCtxDraft(skill.context ?? '')
+              setEditingContext(false)
+            }
+          }}
+          placeholder="课程项目用过 / 实习中常用…"
+          className="flex-1 text-base border-b border-border-soft focus:border-ink py-2xs"
+        />
+        <button
+          onClick={commitCtx}
+          className="text-xs text-text-subtle hover:text-ink"
+        >
+          记下来
+        </button>
+        <button
+          onClick={() => {
+            setCtxDraft(skill.context ?? '')
+            setEditingContext(false)
+          }}
+          className="text-xs text-text-subtle hover:text-text"
+        >
+          再想想
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="group flex items-baseline gap-md">
       <div className="text-base border-b border-dashed border-border-soft/40 group-hover:border-border-soft transition-colors">
         {skill.name} <span className="text-text-subtle">·</span>{' '}
         <span className="text-text-muted">{labelOf(SKILL_LEVEL, skill.level)}</span>
+        {skill.context ? (
+          <>
+            {' '}
+            <span className="text-text-subtle">·</span>{' '}
+            <span className="text-text-muted">{skill.context}</span>
+          </>
+        ) : null}
       </div>
       <button
         onClick={() => setEditing(true)}
         className="text-xs text-text-subtle opacity-0 group-hover:opacity-100 transition-opacity hover:text-ink"
       >
         改一改
+      </button>
+      <button
+        onClick={() => {
+          setCtxDraft(skill.context ?? '')
+          setEditingContext(true)
+        }}
+        className="text-xs text-text-subtle opacity-0 group-hover:opacity-100 transition-opacity hover:text-ink"
+      >
+        {skill.context ? '改场景' : '+ 加场景'}
       </button>
       <button
         onClick={onRemove}
@@ -510,10 +732,8 @@ function SkillRow({
 }
 
 function UploadZone({
-  mode,
   onUpload,
 }: {
-  mode: 'full' | 'compact'
   onUpload: (f: File) => Promise<void>
 }) {
   const ref = useRef<HTMLInputElement | null>(null)
@@ -553,8 +773,6 @@ function UploadZone({
     if (f) handleFile(f)
   }
 
-  const minH = mode === 'full' ? 'min-h-[180px]' : 'min-h-[120px]'
-
   return (
     <div className="flex flex-col gap-sm">
       <div
@@ -575,14 +793,14 @@ function UploadZone({
         onDragLeave={() => setDrag(false)}
         className={[
           'flex flex-col items-center justify-center gap-2xs px-md py-lg',
-          minH,
+          'min-h-[180px]',
           'border border-dashed cursor-pointer transition-colors',
           drag ? 'border-ink bg-surface' : 'border-border-soft hover:border-border',
           busy ? 'opacity-60 pointer-events-none' : '',
         ].join(' ')}
       >
         <p className="text-base text-text">
-          {mode === 'full' ? '拖一份简历过来' : '拖一份新简历过来,我重新读一遍'}
+          拖一份简历过来
         </p>
         <p className="text-sm text-text-muted">或点击选个文件</p>
         <p className="text-xs text-text-subtle font-latin tracking-wide">
