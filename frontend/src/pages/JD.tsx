@@ -100,13 +100,15 @@ export default function JDPage() {
       ) : null}
 
       <div className="flex flex-col gap-md">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="把你看上的那段贴上来,我们对一对."
-          rows={10}
-          className="w-full min-h-[240px] resize-y border-y border-border-soft py-md text-base leading-relaxed placeholder:text-text-subtle focus:border-ink"
-        />
+        <div className="bg-surface rounded-md p-md border-y border-border-soft">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="把你看上的那段贴上来,我们对一对."
+            rows={10}
+            className="w-full min-h-[240px] resize-y bg-transparent py-md text-base leading-relaxed placeholder:text-text-subtle"
+          />
+        </div>
         <div className="flex justify-center">
           <button
             onClick={submit}
