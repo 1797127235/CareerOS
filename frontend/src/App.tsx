@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 
-const FEEDBACK_URL = 'https://github.com/anthropics/claude-code/issues'
+const FEEDBACK_URL = 'https://github.com/1797127235/CareerOS/issues'
 
 function App() {
   return (
