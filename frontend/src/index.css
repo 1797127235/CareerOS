@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: oklch(0.18 0.010 60);
+  --color-surface: oklch(0.22 0.012 60);
+  --color-surface-elevated: oklch(0.27 0.015 60);
+
+  --color-border-soft: oklch(0.32 0.012 60);
+  --color-border: oklch(0.40 0.014 60);
+
+  --color-text: oklch(0.94 0.015 60);
+  --color-text-muted: oklch(0.72 0.012 60);
+  --color-text-subtle: oklch(0.55 0.010 60);
+
+  --color-ink: oklch(0.78 0.140 75);
+  --color-ink-deep: oklch(0.58 0.150 70);
+  --color-ink-soft: oklch(0.88 0.060 80);
+
+  --color-success: oklch(0.74 0.090 150);
+  --color-danger: oklch(0.68 0.150 25);
+
+  --font-han: "LXGW WenKai Screen", "Alegreya Variable", serif;
+  --font-latin: "Alegreya Variable", "LXGW WenKai Screen", serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --font-script: "Caveat", "LXGW WenKai Screen", cursive;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 17px;
+  --text-lg: 21px;
+  --text-xl: 26px;
+  --text-2xl: 33px;
+  --text-3xl: 41px;
+
+  --spacing-2xs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+  --spacing-4xl: 96px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  font-family: var(--font-han);
+  font-size: var(--text-base);
+  line-height: 1.85;
+}
+
+.lang-en, code, pre {
+  line-height: 1.65;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-han);
+  font-weight: 500;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--color-text);
+}
+
+p { margin: 0; }
+
+button, input, textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+
+button { cursor: pointer; }
+
+a {
+  color: var(--color-ink);
+  text-decoration: none;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+a:hover { opacity: 0.75; }
+
+::selection {
+  background: var(--color-ink);
+  color: var(--color-bg);
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-soft);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-border); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes ink-blink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.ink-cursor::after {
+  content: "▌";
+  margin-left: 2px;
+  color: var(--color-ink);
+  animation: ink-blink 1.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@keyframes ink-flow {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(0); }
+}
+.ink-progress {
+  position: relative;
+  height: 1px;
+  background: var(--color-border-soft);
+  overflow: hidden;
+}
+.ink-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--color-ink);
+  animation: ink-flow 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@keyframes ink-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ink-fade-in {
+  animation: ink-fade 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
