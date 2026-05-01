@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.agent.llm_router import chat as llm_chat
+from app.backend.models.jd import JDDiagnosis
 from app.backend.models.user import UserProfile
 from app.backend.schemas.jd import JDDiagnoseResponse, GapSkill
 from app.backend.utils.json_utils import parse_llm_json as _parse_json
@@ -45,6 +46,24 @@ _JD_DIAGNOSE_PROMPT = """你是一个技术岗位匹配诊断专家。请根据�
 只输出 JSON，不要解释。"""
 
 
+def _to_response(diagnosis: JDDiagnosis) -> JDDiagnoseResponse:
+    """ORM → 响应模型（统一构造，避免 POST/GET 两份代码 drift）"""
+    rdata = diagnosis.result_data or {}
+    return JDDiagnoseResponse(
+        diagnosis_id=diagnosis.diagnosis_id,
+        jd_text=diagnosis.jd_text,
+        jd_title=diagnosis.jd_title or "未命名 JD",
+        overall_score=diagnosis.overall_score,
+        summary=diagnosis.summary or "",
+        skill_gaps=[GapSkill(**g) for g in rdata.get("skill_gaps", []) if isinstance(g, dict)],
+        matched_skills=rdata.get("matched_skills", []),
+        strengths=rdata.get("strengths", []),
+        risks=rdata.get("risks", []),
+        resume_tips=rdata.get("resume_tips", []),
+        action_plan=rdata.get("action_plan", []),
+    )
+
+
 async def diagnose_jd(
     db: AsyncSession, user_id: str, jd_text: str
 ) -> JDDiagnoseResponse:
@@ -77,18 +96,87 @@ async def diagnose_jd(
     if not data:
         raise HTTPException(status_code=422, detail="LLM 未返回有效诊断结果")
 
-    # 4. 组装响应
-    return JDDiagnoseResponse(
-        jd_title=data.get("jd_title", ""),
+    # 4. 存库
+    skill_gaps = [GapSkill(**g) for g in data.get("skill_gaps", []) if isinstance(g, dict)]
+    jd_title = data.get("jd_title") or "未命名 JD"
+    diagnosis = JDDiagnosis(
+        user_id=user_id,
+        jd_text=jd_text,
+        jd_title=jd_title,
         overall_score=data.get("overall_score", 0),
         summary=data.get("summary", ""),
-        matched_skills=data.get("matched_skills", []),
-        skill_gaps=[GapSkill(**g) for g in data.get("skill_gaps", []) if isinstance(g, dict)],
-        strengths=data.get("strengths", []),
-        risks=data.get("risks", []),
-        resume_tips=data.get("resume_tips", []),
-        action_plan=data.get("action_plan", []),
+        result_data={
+            "skill_gaps": [g.model_dump() for g in skill_gaps],
+            "matched_skills": data.get("matched_skills", []),
+            "strengths": data.get("strengths", []),
+            "risks": data.get("risks", []),
+            "resume_tips": data.get("resume_tips", []),
+            "action_plan": data.get("action_plan", []),
+        },
     )
+    db.add(diagnosis)
+    await db.flush()  # 用 flush，让 get_db 接管 commit
+    logger.info("诊断结果已存库: diagnosis_id=%s, user_id=%s", diagnosis.diagnosis_id, user_id)
+
+    return _to_response(diagnosis)
+
+
+async def get_diagnosis(
+    db: AsyncSession, user_id: str, diagnosis_id: str
+) -> JDDiagnoseResponse:
+    """获取单条诊断详情（校验用户归属）"""
+    result = await db.execute(
+        select(JDDiagnosis).where(
+            JDDiagnosis.diagnosis_id == diagnosis_id,
+            JDDiagnosis.user_id == user_id,
+        )
+    )
+    diagnosis = result.scalar_one_or_none()
+    if not diagnosis:
+        raise HTTPException(status_code=404, detail="诊断记录不存在")
+
+    return _to_response(diagnosis)
+
+
+async def get_history(
+    db: AsyncSession, user_id: str, limit: int = 50
+) -> list[dict]:
+    """获取诊断历史（LIMIT 50，不做分页）"""
+    result = await db.execute(
+        select(JDDiagnosis)
+        .where(JDDiagnosis.user_id == user_id)
+        .order_by(JDDiagnosis.created_at.desc())
+        .limit(limit)
+    )
+    diagnoses = result.scalars().all()
+    return [
+        {
+            "diagnosis_id": d.diagnosis_id,
+            "jd_title": d.jd_title or "未命名 JD",
+            "overall_score": d.overall_score,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+        }
+        for d in diagnoses
+    ]
+
+
+async def delete_diagnosis(
+    db: AsyncSession, user_id: str, diagnosis_id: str
+) -> bool:
+    """硬删除单条诊断（校验用户归属）"""
+    result = await db.execute(
+        select(JDDiagnosis).where(
+            JDDiagnosis.diagnosis_id == diagnosis_id,
+            JDDiagnosis.user_id == user_id,
+        )
+    )
+    diagnosis = result.scalar_one_or_none()
+    if not diagnosis:
+        raise HTTPException(status_code=404, detail="诊断记录不存在")
+
+    await db.delete(diagnosis)
+    await db.flush()  # 用 flush，让 get_db 接管 commit
+    return True
 
 
 async def _load_profile_summary(db: AsyncSession, user_id: str) -> str:

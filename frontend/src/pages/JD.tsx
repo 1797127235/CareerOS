@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   diagnoseJD,
   getProfile,
-  type GapSkill,
-  type JDDiagnoseResponse,
+  getJDHistory,
+  deleteJDDiagnosis,
+  type JDHistoryItem,
   type Profile,
 } from '../lib/api'
-
-const PRIORITY_HINT: Record<string, string> = {
-  high: '先补这个',
-  medium: '可以补',
-  low: '再说',
-}
 
 function isFilled(p: Profile | null): boolean {
   if (!p) return false
@@ -25,17 +20,39 @@ function isFilled(p: Profile | null): boolean {
 }
 
 export default function JDPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<JDDiagnoseResponse | null>(null)
   const [profileFilled, setProfileFilled] = useState<boolean | null>(null)
+  const [history, setHistory] = useState<JDHistoryItem[]>([])
+
+  // 从 JDReport 页"重新诊断"带回来的 jd_text
+  useEffect(() => {
+    const jdText = (location.state as { jdText?: string })?.jdText
+    if (jdText) {
+      setText(jdText)
+      // 清空 state，避免刷新时重复填充
+      window.history.replaceState({}, '')
+    }
+  }, [location.state])
 
   useEffect(() => {
     getProfile()
       .then((p) => setProfileFilled(isFilled(p)))
       .catch(() => setProfileFilled(false))
+    loadHistory()
   }, [])
+
+  async function loadHistory() {
+    try {
+      const res = await getJDHistory()
+      setHistory(res.items)
+    } catch {
+      // 静默失败
+    }
+  }
 
   async function submit() {
     const trimmed = text.trim()
@@ -47,11 +64,22 @@ export default function JDPage() {
     setError(null)
     try {
       const res = await diagnoseJD(trimmed)
-      setResult(res)
+      if (res.diagnosis_id) {
+        navigate(`/jd/${res.diagnosis_id}`)
+      }
     } catch (e) {
       setError((e as Error).message || '我刚才走神了,你再问我一遍.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleDelete(diagnosisId: string) {
+    try {
+      await deleteJDDiagnosis(diagnosisId)
+      setHistory((prev) => prev.filter((h) => h.diagnosis_id !== diagnosisId))
+    } catch (e) {
+      setError((e as Error).message || '删除失败')
     }
   }
 
@@ -100,128 +128,75 @@ export default function JDPage() {
 
       {error ? <p className="text-danger text-sm">{error}</p> : null}
 
-      {result ? <Result data={result} profileFilled={profileFilled} /> : null}
-    </div>
-  )
-}
-
-function Result({
-  data,
-  profileFilled,
-}: {
-  data: JDDiagnoseResponse
-  profileFilled: boolean | null
-}) {
-  const have = [...data.matched_skills, ...data.strengths]
-
-  return (
-    <div className="flex flex-col gap-2xl ink-fade-in">
-      <div className="h-px w-full bg-border-soft" />
-
-      <div className="flex flex-col gap-xs">
-        {data.jd_title ? (
-          <p className="text-text-subtle text-sm">{data.jd_title}</p>
-        ) : null}
-        <div className="font-mono text-3xl text-ink leading-none">
-          {data.overall_score}
-        </div>
-        <p className="text-sm text-text-muted">
-          / 100{data.summary ? ` · ${data.summary}` : ''}
-        </p>
-      </div>
-
-      {have.length > 0 ? (
-        <Section caption="你已经具备的">
-          <BulletList items={have} />
-        </Section>
-      ) : null}
-
-      {data.skill_gaps.length > 0 ? (
-        <Section caption="你还缺的">
+      {/* 历史列表 */}
+      {history.length > 0 ? (
+        <div className="flex flex-col gap-md">
+          <div className="h-px w-full bg-border-soft" />
+          <h3 className="text-lg">诊断历史</h3>
           <ul className="flex flex-col gap-xs">
-            {data.skill_gaps.map((g, i) => (
-              <GapItem key={i} g={g} />
+            {history.map((item) => (
+              <HistoryItem
+                key={item.diagnosis_id}
+                item={item}
+                onDelete={() => handleDelete(item.diagnosis_id)}
+              />
             ))}
           </ul>
-        </Section>
-      ) : null}
-
-      {data.risks.length > 0 ? (
-        <Section caption="提个醒">
-          <BulletList items={data.risks} />
-        </Section>
-      ) : null}
-
-      {data.action_plan.length > 0 ? (
-        <Section caption="下一步建议">
-          <ol className="flex flex-col gap-sm">
-            {data.action_plan.map((a, i) => (
-              <li key={i} className="flex gap-md text-base text-text">
-                <span className="font-mono text-text-subtle min-w-[1.5rem]">
-                  {i + 1}.
-                </span>
-                <span className="flex-1">{a}</span>
-              </li>
-            ))}
-          </ol>
-        </Section>
-      ) : null}
-
-      {data.resume_tips.length > 0 ? (
-        <Section caption="改简历的话">
-          <BulletList items={data.resume_tips} />
-        </Section>
-      ) : null}
-
-      {profileFilled === false ? (
-        <p className="text-text-muted text-sm">
-          想更准确?{' '}
-          <Link to="/profile" className="text-ink hover:text-ink-deep">
-            去补全画像 →
-          </Link>
-        </p>
+        </div>
       ) : null}
     </div>
   )
 }
 
-function Section({
-  caption,
-  children,
+function HistoryItem({
+  item,
+  onDelete,
 }: {
-  caption: string
-  children: React.ReactNode
+  item: JDHistoryItem
+  onDelete: () => void
 }) {
-  return (
-    <section className="flex flex-col gap-md">
-      <h3 className="text-lg">{caption}</h3>
-      {children}
-    </section>
-  )
-}
+  const [confirming, setConfirming] = useState(false)
 
-function BulletList({ items }: { items: string[] }) {
-  return (
-    <ul className="flex flex-col gap-2xs">
-      {items.map((s, i) => (
-        <li key={i} className="flex items-baseline gap-sm text-base text-text">
-          <span className="text-text-subtle">·</span>
-          <span className="flex-1">{s}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
+  useEffect(() => {
+    if (!confirming) return
+    const t = window.setTimeout(() => setConfirming(false), 3000)
+    return () => window.clearTimeout(t)
+  }, [confirming])
 
-function GapItem({ g }: { g: GapSkill }) {
-  const right = g.suggested_hours
-    ? `约 ${g.suggested_hours} 小时`
-    : (PRIORITY_HINT[g.priority] ?? g.priority)
+  const date = new Date(item.created_at)
+  const now = new Date()
+  const dateStr =
+    date.getFullYear() === now.getFullYear()
+      ? `${date.getMonth() + 1}-${date.getDate()}`
+      : `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+
+  function handleClick() {
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
+    onDelete()
+  }
+
   return (
-    <li className="flex items-baseline gap-sm text-base text-text">
-      <span className="text-text-subtle">·</span>
-      <span className="flex-1">{g.skill}</span>
-      <span className="text-text-muted text-sm shrink-0">{right}</span>
+    <li className="group flex items-center gap-md">
+      <Link
+        to={`/jd/${item.diagnosis_id}`}
+        className="flex-1 flex items-center gap-md text-base text-text hover:text-ink"
+      >
+        <span className="flex-1 truncate">{item.jd_title}</span>
+        <span className="text-text-muted text-sm">{item.overall_score}分</span>
+        <span className="text-text-subtle text-sm">{dateStr}</span>
+      </Link>
+      <button
+        onClick={handleClick}
+        className={[
+          'text-xs whitespace-nowrap transition-colors',
+          confirming ? 'text-danger' : 'text-text-subtle opacity-0 group-hover:opacity-100 hover:text-danger',
+        ].join(' ')}
+      >
+        {confirming ? '确定删除?' : '✕'}
+      </button>
     </li>
   )
 }

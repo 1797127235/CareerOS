@@ -16,6 +16,8 @@ class GapSkill(BaseModel):
 
 
 class JDDiagnoseResponse(BaseModel):
+    diagnosis_id: str | None = None  # 存库后返回
+    jd_text: str | None = None  # 原始 JD 文本，支持重诊断
     jd_title: str = ""
     overall_score: int = Field(default=0, ge=0, le=100)
     summary: str = ""
