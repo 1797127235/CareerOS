@@ -53,13 +53,9 @@ const SECTION_IDS = SECTIONS.map((s) => s.id)
 // ── 速写本布局的扩展字段 (v1: mock-only,后端字段后补) ──
 type PortfolioLink = { label: string; url: string }
 
+// ExtendedProfile 扩展前端展示所需的字段（后端 Profile 已包含大部分）
 type ExtendedProfile = Profile & {
-  projects?: Array<{ period: string; title: string; description: string }>
-  internships?: Array<{ period: string; company: string; role: string; description: string }>
-  portfolio_links?: PortfolioLink[]
-  target_cities?: string[]
-  expected_salary?: string | null
-  english_level?: string | null
+  // 前端独有的扩展字段可在此添加
 }
 
 const MOCK_PROFILE: ExtendedProfile = {
@@ -81,14 +77,14 @@ const MOCK_PROFILE: ExtendedProfile = {
   gpa: '3.8/4.0',
   ranking: '前 15%',
   awards: ['国家奖学金 2024', 'ACM-ICPC 区域赛银牌', '蓝桥杯省一'],
-  target_cities: ['北京', '上海'],
+  city: '北京 / 上海',
   expected_salary: '25-35k',
   english_level: 'CET-6',
   portfolio_links: [
     { label: 'github.com/xxx', url: 'https://github.com/' },
     { label: '个人博客', url: 'https://example.com/' },
   ],
-  internships: [
+  work_experience: [
     {
       period: '2024.06 — 现在',
       company: '字节跳动',
@@ -318,23 +314,11 @@ function FilledProfile({
 
         <BriefRow>
           <BriefField
-            display={
-              profile.target_cities && profile.target_cities.length
-                ? profile.target_cities.join(' / ')
-                : '城市'
-            }
-            value={profile.target_cities?.join(', ') ?? ''}
-            onSave={(v) => {
-              const cities = v
-                .split(/[,,\s/]+/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-              return onPatch({
-                target_cities: cities.length ? cities : undefined,
-              })
-            }}
-            placeholder="北京, 上海"
-            inputClass="w-40"
+            display={profile.city || '城市'}
+            value={profile.city}
+            onSave={(v) => onPatch({ city: v || null })}
+            placeholder="北京"
+            inputClass="w-28"
           />
           <BriefSep />
           <BriefField
@@ -693,7 +677,7 @@ function mergeTimeline(profile: ExtendedProfile): TimelineItem[] {
       sortKey: parsePeriodStart(p.period),
     })
   }
-  for (const i of profile.internships ?? []) {
+  for (const i of profile.work_experience ?? []) {
     items.push({
       period: i.period,
       title: i.company,
@@ -921,7 +905,7 @@ function computeCompleteness(p: ExtendedProfile): {
     ['毕业年', !!p.graduation_year],
     ['方向', !!p.target_direction],
     ['公司层级', !!p.target_company_level],
-    ['城市', Array.isArray(p.target_cities) && p.target_cities.length > 0],
+    ['城市', !!p.city],
     ['英语', !!p.english_level],
     ['期望薪资', !!p.expected_salary],
     [
@@ -931,7 +915,7 @@ function computeCompleteness(p: ExtendedProfile): {
     [
       '项目/实习',
       (Array.isArray(p.projects) && p.projects.length > 0) ||
-        (Array.isArray(p.internships) && p.internships.length > 0),
+        (Array.isArray(p.work_experience) && p.work_experience.length > 0),
     ],
     [
       '技能',

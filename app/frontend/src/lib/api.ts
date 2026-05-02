@@ -15,6 +15,25 @@ export type Profile = {
   gpa: string | null;
   ranking: string | null;
   awards: string[] | null;
+  // 履历与扩展信息
+  bio: string | null;
+  city: string | null;
+  english_level: string | null;
+  expected_salary: string | null;
+  portfolio_links: Array<{ label: string; url: string }> | null;
+  projects: Array<{
+    title: string;
+    tech_stack: string | null;
+    role: string | null;
+    period: string;
+    description: string;
+  }> | null;
+  work_experience: Array<{
+    company: string;
+    role: string;
+    period: string;
+    description: string;
+  }> | null;
 };
 
 export type ResumeUploadResponse = {

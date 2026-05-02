@@ -20,7 +20,7 @@ from typing import cast
 
 import yaml
 
-from app.backend.agent.llm_router import get_model, _get_client, TaskType
+from app.backend.agent.llm_router import chat as llm_chat, TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -167,12 +167,10 @@ async def classify(user_input: str) -> tuple[str, TaskType]:
 
 async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
     """
-    单次 Chat Completions：只输出一个 intent 字符串（英文、与目录名一致）。
+    单次 LLM 调用：只输出一个 intent 字符串（英文、与目录名一致）。
 
     使用 general_chat 档位模型即可：分类任务轻量，且与路由里「闲聊/轻推理」一致。
     """
-    client = _get_client()
-
     lines = [
         "你是一个意图分类器。根据用户输入，从以下意图中选一个，只输出意图名称（英文），不要解释。\n",
         "意图类型：",
@@ -182,15 +180,14 @@ async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
     lines.append(f"\n用户输入：{user_input}")
     lines.append("输出（只输出一个词）：")
 
-    response = await client.chat.completions.create(
-        model=get_model("general_chat"),
+    content = await llm_chat(
+        task_type="general_chat",
         messages=[{"role": "user", "content": "\n".join(lines)}],
         temperature=0.0,
         max_tokens=20,
     )
 
-    content = response.choices[0].message.content if response.choices else None
-    if content is None:
+    if not content:
         return "consultation"
     # 与文件夹命名惯例对齐：小写 + 下划线（如 path-planning → path_planning）
     return content.strip().lower().replace("-", "_")

@@ -1,16 +1,22 @@
-"""LLM 路由 — 按用途自动选择模型"""
+"""LLM 路由 — 按用途自动选择模型（LiteLLM 统一抽象层）"""
 
 from __future__ import annotations
 
-from functools import lru_cache
+import asyncio
+import logging
 from typing import Literal
 
-from openai import AsyncOpenAI
+import litellm
 
 from app.backend.config import get_settings
 
+logger = logging.getLogger(__name__)
+
+# LiteLLM 全局配置
+litellm.drop_params = True   # 丢弃不支持的参数，避免报错
+litellm.modify_params = True  # 自动修改参数
+
 # ── 任务类型 → 模型映射 ──
-# 不设 LLM_MODEL 环境变量，代码内置路由
 _ROUTE_MAP: dict[str, str] = {
     "general_chat": "qwen-plus",        # 日常对话、通用问答
     "career_planning": "qwen-plus",      # 职业规划、路径生成（需强推理）
@@ -29,17 +35,10 @@ TaskType = Literal[
 ]
 
 
-@lru_cache()
-def _get_client() -> AsyncOpenAI:
-    settings = get_settings()
-    return AsyncOpenAI(
-        api_key=settings.dashscope_api_key,
-        base_url=settings.dashscope_base_url,
-    )
-
-
-def get_model(task_type: TaskType) -> str:
-    return _ROUTE_MAP.get(task_type, "qwen-plus")
+def _litellm_model(task_type: TaskType) -> str:
+    """任务类型 → LiteLLM 模型标识（带 provider 前缀）"""
+    model = _ROUTE_MAP.get(task_type, "qwen-plus")
+    return f"dashscope/{model}"
 
 
 async def chat_stream(
@@ -47,23 +46,36 @@ async def chat_stream(
     messages: list[dict],
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    retries: int = 2,
 ):
-    """流式调用 LLM，返回 token 迭代器"""
-    client = _get_client()
-    model = get_model(task_type)
-    # 事实类降低温度，创意类用默认
+    """流式调用 LLM，返回 token 迭代器（LiteLLM，内置重试）"""
+    settings = get_settings()
+    model = _litellm_model(task_type)
     temp = 0.3 if task_type in ("skill_analysis", "memory_summarize") else temperature
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temp,
-        max_tokens=max_tokens,
-        stream=True,
-    )
-    async for chunk in response:
-        delta = chunk.choices[0].delta if chunk.choices else None
-        if delta and delta.content:
-            yield delta.content
+
+    for attempt in range(retries + 1):
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=messages,
+                temperature=temp,
+                max_tokens=max_tokens,
+                api_key=settings.dashscope_api_key,
+                base_url=settings.dashscope_base_url,
+                stream=True,
+            )
+            async for chunk in response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield delta.content
+            return
+        except Exception as e:
+            if attempt < retries:
+                logger.warning("LLM stream failed (attempt %d/%d): %s", attempt + 1, retries + 1, e)
+                await asyncio.sleep(2 ** attempt)
+                continue
+            logger.error("LLM stream failed after %d retries: %s", retries + 1, e)
+            raise
 
 
 async def chat(
@@ -71,26 +83,44 @@ async def chat(
     messages: list[dict],
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    retries: int = 2,
 ) -> str:
-    """非流式调用 LLM，返回完整文本"""
-    client = _get_client()
-    model = get_model(task_type)
+    """非流式调用 LLM，返回完整文本（LiteLLM，内置重试）"""
+    settings = get_settings()
+    model = _litellm_model(task_type)
     temp = 0.3 if task_type in ("skill_analysis", "memory_summarize") else temperature
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temp,
-        max_tokens=max_tokens,
-        stream=False,
-    )
-    return response.choices[0].message.content or ""
+
+    for attempt in range(retries + 1):
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=messages,
+                temperature=temp,
+                max_tokens=max_tokens,
+                api_key=settings.dashscope_api_key,
+                base_url=settings.dashscope_base_url,
+                stream=False,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            if attempt < retries:
+                logger.warning("LLM chat failed (attempt %d/%d): %s", attempt + 1, retries + 1, e)
+                await asyncio.sleep(2 ** attempt)
+                continue
+            logger.error("LLM chat failed after %d retries: %s", retries + 1, e)
+            raise
 
 
 async def embed(text: str) -> list[float]:
-    """文本向量化"""
-    client = _get_client()
-    resp = await client.embeddings.create(
-        model=_ROUTE_MAP["embedding"],
+    """文本向量化（LiteLLM）"""
+    settings = get_settings()
+    model = _litellm_model("embedding")
+    resp = await litellm.aembedding(
+        model=model,
         input=text,
+        api_key=settings.dashscope_api_key,
+        base_url=settings.dashscope_base_url,
     )
+    if not resp.data:
+        raise ValueError("Embedding API returned empty data")
     return resp.data[0].embedding

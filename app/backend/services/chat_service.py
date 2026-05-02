@@ -251,6 +251,9 @@ async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
         except Exception:
             await db.rollback()
             logger.warning("摘要生成失败，保留旧摘要: conversation_id=%s", conv.conversation_id)
+        finally:
+            # 释放锁引用，防止无限增长
+            _summary_locks.pop(conv.conversation_id, None)
 
 
 def _sse_token(content: str, conversation_id: str) -> str:

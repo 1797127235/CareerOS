@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,7 +19,7 @@ class Settings(BaseSettings):
     # ── 核心鉴权 ──
     dashscope_api_key: str = ""
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    jwt_secret_key: str = ""  # 生产环境必须通过 .env 设置
+    jwt_secret_key: str = Field(..., min_length=1)
 
     # ── 模型配置 ──
     embedding_model: str = "text-embedding-v4"
