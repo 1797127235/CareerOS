@@ -22,9 +22,21 @@ from app.backend.utils.json_utils import parse_llm_json as _parse_json
 
 logger = logging.getLogger(__name__)
 
+# ── 文件限制 ──
 _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _MAX_PDF_PAGES = 50
 _MAX_DOCX_PARAGRAPHS = 1000
+
+# ── LLM 参数 ──
+_LLM_TEMPERATURE = 0.1
+_LLM_MAX_TOKENS = 1024
+_LLM_TRUNCATION_LENGTH = 5000  # 截断过长文本（前 N 字符信息密度最高）
+
+# ── 预览 ──
+_PREVIEW_LENGTH = 500  # 简历文本预览长度
+
+# ── 默认值 ──
+_DEFAULT_SKILL_LEVEL = "familiar"
 
 
 async def _extract_text(file: UploadFile) -> str:
@@ -107,8 +119,8 @@ _PROFILE_EXTRACT_PROMPT = """你是一个简历解析器。从以下简历文本
 
 async def _llm_extract(raw_text: str) -> dict:
     """调用 LLM 从简历文本提取结构化画像"""
-    # 截断过长文本（前 5000 字符信息密度最高）
-    truncated = raw_text[:5000]
+    # 截断过长文本（前 N 字符信息密度最高）
+    truncated = raw_text[:_LLM_TRUNCATION_LENGTH]
     prompt = _PROFILE_EXTRACT_PROMPT.format(
         current_year=datetime.now().year,
         resume_text=truncated,
@@ -117,8 +129,8 @@ async def _llm_extract(raw_text: str) -> dict:
     result = await llm_chat(
         task_type="skill_analysis",  # 低温度
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-        max_tokens=1024,
+        temperature=_LLM_TEMPERATURE,
+        max_tokens=_LLM_MAX_TOKENS,
     )
 
     return _parse_json(result)
@@ -167,18 +179,21 @@ async def _save_profile(db: AsyncSession, user_id: str, data: dict) -> ProfileRe
 
     skills_context: dict[str, str] = {}
     skills = data.get("current_skills")
-    if skills:
-        # 标准化为 [{"skill": name, "level": level}, ...]
-        if isinstance(skills, list):
+    if isinstance(skills, list):
+        if not skills:
+            # 空列表：清空旧技能
+            profile.current_skills = []
+        else:
+            # 标准化为 [{"skill": name, "level": level}, ...]
             normalized = []
             for s in skills:
                 if isinstance(s, str):
-                    normalized.append({"skill": s, "level": "familiar"})
+                    normalized.append({"skill": s, "level": _DEFAULT_SKILL_LEVEL})
                 elif isinstance(s, dict):
                     name = s.get("name") or s.get("skill") or ""
                     normalized.append({
                         "skill": name,
-                        "level": s.get("level", "familiar"),
+                        "level": s.get("level", _DEFAULT_SKILL_LEVEL),
                     })
                     ctx = s.get("context")
                     if name and ctx:
@@ -269,11 +284,15 @@ async def update_profile(
         profile.current_skills = [
             {"skill": s.name, "level": s.level} for s in skills
         ]
-        skills_ctx = {s.name: s.context for s in skills if s.context}
-        if skills_ctx:
-            pdata["skills_context"] = skills_ctx
-        else:
-            pdata.pop("skills_context", None)
+        # merge：只更新本次传入的技能的 context，保留其他技能的 context
+        existing_ctx = pdata.get("skills_context") or {}
+        new_ctx = {s.name: s.context for s in skills if s.context}
+        merged = {**existing_ctx, **new_ctx}
+        # 清理本次传入但 context 为空的技能
+        for s in skills:
+            if not s.context:
+                merged.pop(s.name, None)
+        pdata["skills_context"] = merged if merged else None
 
     edu_keys = {"gpa", "ranking", "awards"} & set_fields
     if edu_keys:
@@ -326,7 +345,7 @@ def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> P
                 name = s.get("skill") or s.get("name") or ""
                 skills.append(SkillItem(
                     name=name,
-                    level=s.get("level", "familiar"),
+                    level=s.get("level", _DEFAULT_SKILL_LEVEL),
                     context=skills_ctx.get(name) if name else None,
                 ))
 
@@ -389,5 +408,5 @@ async def process_resume(
         raise HTTPException(status_code=500, detail=f"数据保存失败: {e}")
 
     # 4. 返回结果
-    preview = raw_text[:500].replace("\n", " ")
+    preview = raw_text[:_PREVIEW_LENGTH].replace("\n", " ")
     return ResumeUploadResponse(profile=profile, raw_text_preview=preview)
