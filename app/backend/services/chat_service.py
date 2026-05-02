@@ -11,7 +11,7 @@ from typing import AsyncIterator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.agent.orchestrator import classify, build_system_prompt
+from app.backend.agent.orchestrator import run_orchestrator
 from app.backend.agent.llm_router import chat_stream, chat as llm_chat
 from app.backend.models.conversation import Conversation, Message
 
@@ -86,13 +86,14 @@ async def stream_chat(
         for msg in reversed(recent)
     ]
 
-    # 1. 先意图分类，再持久化用户消息（附带 intent）
-    #    classify 失败 → 用户消息不落库 → 无孤儿消息
-    intent: str = "consultation"
+    # 1. 加载画像 + 意图分类 + 组装 prompt（失败不落库，无孤儿消息）
     try:
-        intent, task_type = await classify(user_input)
+        user_profile = await _load_user_profile(db, user_id)
+        intent, task_type, system = await run_orchestrator(
+            user_input, user_profile, conv.summary
+        )
     except Exception:
-        logger.exception("意图分类失败: conversation_id=%s", conv.conversation_id)
+        logger.exception("编排失败: conversation_id=%s", conv.conversation_id)
         yield _sse_error("服务暂不可用，请稍后重试")
         return
 
@@ -115,8 +116,6 @@ async def stream_chat(
 
     # 2. 流式生成 + 保存 AI 回复
     try:
-        user_profile = await _load_user_profile(db, user_id)
-        system = build_system_prompt(user_profile, intent, conv.summary)
         messages = [{"role": "system", "content": system}] + history_messages + [
             {"role": "user", "content": user_input}
         ]

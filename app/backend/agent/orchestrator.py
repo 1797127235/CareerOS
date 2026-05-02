@@ -1,176 +1,209 @@
-"""Agent 编排引擎 — LangGraph 意图分类 + 流式生成"""
+"""Agent 编排引擎 — Skill 自发现 + 意图分类 + Prompt 组装"""
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, Literal
-from enum import StrEnum
 
-from langgraph.graph import StateGraph, START, END
-from langgraph.types import Command
+import yaml
 
-from app.backend.agent.llm_router import get_model, TaskType, _get_client
+from app.backend.agent.llm_router import get_model, _get_client
 
+logger = logging.getLogger(__name__)
 
-# ═══════════════════════════════════════════════
-# 意图枚举
-# ═══════════════════════════════════════════════
-
-class Intent(StrEnum):
-    CONSULTATION = "consultation"
-    PATH_PLANNING = "path_planning"
-    RESUME = "resume"
-    INTERVIEW = "interview"
-    ANALYSIS = "analysis"
-    TECHNICAL_QA = "technical_qa"
-    EMOTIONAL = "emotional"
+_SKILLS_DIR = Path(__file__).parent / "skills"
 
 
-INTENT_TO_TASK: dict[str, TaskType] = {
-    "consultation": "career_planning",
-    "path_planning": "path_generation",
-    "resume": "resume_optimize",
-    "interview": "mock_interview",
-    "analysis": "skill_analysis",
-    "technical_qa": "general_chat",
-    "emotional": "general_chat",
-}
-
-
-# ═══════════════════════════════════════════════
-# LangGraph 意图分类（只做分类这一件事）
-# ═══════════════════════════════════════════════
-
-class ClassifyState(TypedDict):
-    user_input: str
+@dataclass(frozen=True, slots=True)
+class SkillMeta:
     intent: str
+    name: str
+    description: str
+    task_type: str
+    body: str
 
 
-async def classify_intent_node(state: ClassifyState) -> Command[Literal["__end__"]]:
-    """LLM 意图分类 → 结束图，返回 intent"""
+_skills_cache: dict[str, SkillMeta] | None = None
+
+
+def discover_skills() -> dict[str, SkillMeta]:
+    """扫描 skills/ 目录，解析 SKILL.md frontmatter，返回 intent → SkillMeta 映射。"""
+    global _skills_cache
+    if _skills_cache is not None:
+        return _skills_cache
+
+    skills: dict[str, SkillMeta] = {}
+    if not _SKILLS_DIR.exists():
+        _skills_cache = skills
+        return skills
+
+    for subdir in sorted(_SKILLS_DIR.iterdir()):
+        if not subdir.is_dir():
+            continue
+        md_path = subdir / "SKILL.md"
+        if not md_path.exists():
+            continue
+
+        try:
+            content = md_path.read_text(encoding="utf-8")
+            meta, body = _parse_skill_md(content)
+        except Exception as e:
+            logger.warning("解析 SKILL.md 失败: %s — %s", md_path, e)
+            continue
+
+        intent = subdir.name
+        skills[intent] = SkillMeta(
+            intent=intent,
+            name=meta.get("name", intent),
+            description=meta.get("description", ""),
+            task_type=meta.get("task_type", "general_chat"),
+            body=body,
+        )
+
+    _skills_cache = skills
+    return skills
+
+
+def _parse_skill_md(text: str) -> tuple[dict, str]:
+    """提取 YAML frontmatter + 正文。"""
+    if not text.startswith("---"):
+        return {}, text.strip()
+
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}, text.strip()
+
+    try:
+        meta = yaml.safe_load(parts[1]) or {}
+    except Exception:
+        meta = {}
+
+    body = parts[2].strip()
+    return meta, body
+
+
+# ── 意图分类 ──
+
+
+async def classify(user_input: str) -> tuple[str, str]:
+    """输入文本 → 返回 (intent, task_type)。"""
+    skills = discover_skills()
+    if not skills:
+        return "consultation", "general_chat"
+
+    intent = await _classify_llm(user_input, skills)
+    skill = skills.get(intent)
+    if skill is None:
+        # fallback：前缀匹配
+        for key in skills:
+            if key in intent or intent in key:
+                skill = skills[key]
+                break
+        if skill is None:
+            skill = skills.get("consultation") or next(iter(skills.values()))
+    return skill.intent, skill.task_type
+
+
+async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
     client = _get_client()
 
-    prompt = f"""你是一个意图分类器。根据用户输入，从以下意图中选一个，只输出意图名称，不要解释。
-
-意图类型：
-- consultation：职业方向咨询（后端/前端/算法等方向的区别、前景、适合什么）
-- path_planning：学习路径规划（怎么学、路线、多久能学会）
-- resume：简历相关（优化简历、项目包装、投递策略）
-- interview：面试准备（模拟面试、八股文、算法题）
-- analysis：能力差距分析（和岗位差多少、哪里不足）
-- technical_qa：纯技术问答（原理、为什么、怎么实现）
-- emotional：情绪疏导（焦虑、迷茫、压力大）
-
-用户输入：{state["user_input"]}
-输出（只输出一个词）："""
+    lines = [
+        "你是一个意图分类器。根据用户输入，从以下意图中选一个，只输出意图名称（英文），不要解释。\n",
+        "意图类型：",
+    ]
+    for intent, skill in skills.items():
+        lines.append(f"- {intent}：{skill.description}")
+    lines.append(f"\n用户输入：{user_input}")
+    lines.append("输出（只输出一个词）：")
 
     response = await client.chat.completions.create(
         model=get_model("general_chat"),
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": "\n".join(lines)}],
         temperature=0.0,
         max_tokens=20,
     )
-    intent_str = (
-        response.choices[0].message.content.strip().lower()
-        if response.choices
-        else "consultation"
-    )
-    return Command(update={"intent": intent_str.replace("-", "_")}, goto=END)
+
+    content = response.choices[0].message.content if response.choices else None
+    if content is None:
+        return "consultation"
+    return content.strip().lower().replace("-", "_")
 
 
-def _build_classify_graph() -> StateGraph:
-    workflow = StateGraph(ClassifyState)
-    workflow.add_node("classify_intent", classify_intent_node)
-    workflow.add_edge(START, "classify_intent")
-    return workflow.compile()
+# ── Prompt 组装 ──
 
 
-_classify_graph = None
+def build_system_prompt(
+    user_profile: dict | None,
+    intent: str,
+    conversation_summary: str | None = None,
+) -> str:
+    """组装系统提示词。"""
+    skills = discover_skills()
+    skill = skills.get(intent)
 
-
-def get_classify_graph():
-    global _classify_graph
-    if _classify_graph is None:
-        _classify_graph = _build_classify_graph()
-    return _classify_graph
-
-
-async def classify(user_input: str) -> tuple[str, TaskType]:
-    """便捷函数：输入文本 → 返回 (intent, task_type)"""
-    graph = get_classify_graph()
-    result = await graph.ainvoke({"user_input": user_input, "intent": ""})
-    intent = result.get("intent", "consultation")
-    task = INTENT_TO_TASK.get(intent, "general_chat")
-    return intent, task
-
-
-# ═══════════════════════════════════════════════
-# 系统提示词 — 按需从 SKILL.md 加载正文，仅分类 prompt 常驻
-# ═══════════════════════════════════════════════
-
-# 意图分类用（简短，~50 tokens）
-_INTENT_PROMPTS: dict[str, str] = {
-    "consultation": "当前任务：职业方向咨询。帮助用户了解计算机行业各方向，介绍工作内容、技能要求、发展前景。",
-    "path_planning": "当前任务：学习路径规划。根据用户目标岗位、当前基础，生成结构化学习路径，标注学习资源和验收标准。",
-    "resume": "当前任务：简历优化。基于 STAR 法则改进项目描述，提高 JD 匹配度，提供具体修改建议。",
-    "interview": "当前任务：模拟面试。作为技术面试官，出题、追问、评分。覆盖八股/算法/系统设计/行为面试。",
-    "analysis": "当前任务：能力差距分析。分析用户技能与目标岗位差距，标注等级，给出补全建议和时间估算。",
-    "technical_qa": "当前任务：技术答疑。用大白话讲清楚技术原理和实现方式。",
-    "emotional": "当前任务：情感疏导。接纳情绪，用数据和案例安抚，给出建设性建议。",
-}
-
-# skill 正文缓存（按需懒加载，首次命中才读文件）
-_skill_body_cache: dict[str, str] = {}
-
-
-def _load_skill_body(intent: str) -> str:
-    """按需加载 SKILL.md 正文，缓存避免重复 IO"""
-    if intent in _skill_body_cache:
-        return _skill_body_cache[intent]
-
-    dir_name = intent
-    path = Path(__file__).parent / "skills" / dir_name / "SKILL.md"
-    if not path.exists():
-        return ""
-
-    content = path.read_text(encoding="utf-8")
-    body = content.split("---", 2)[-1].strip() if "---" in content else content.strip()
-    _skill_body_cache[intent] = body
-    return body
-
-
-def build_system_prompt(user_profile: dict | None, intent: str, conversation_summary: str | None = None) -> str:
-    """组装系统提示词 — 分类 prompt 常驻 + Skill 正文按需加载 + 对话摘要"""
     parts = [
         "你是「码路领航」职业规划学长 Agent，一名研二计算机学长，在大厂实习过。",
         "风格：亲切、有干货、用大白话讲技术、不装腔作势。",
         "回答格式：【一句话总结】→ 详细解释 → 个性化建议 → 下一步行动。",
     ]
+
     if user_profile:
         p = user_profile
-        parts.append(
-            f"\n【用户背景】{p.get('nickname', '同学')}，"
-            f"{p.get('grade', '')}，{p.get('school_name', '')}，"
-            f"{p.get('major', '')}"
-            f"\n目标方向：{p.get('target_direction', '未设定')}"
-        )
-        if p.get("current_skills"):
-            skills = p["current_skills"]
-            if isinstance(skills, list):
-                names = [s.get("skill", "") for s in skills]
+        nickname = p.get("nickname") or "同学"
+        grade = p.get("grade") or ""
+        school = p.get("school_name") or ""
+        major = p.get("major") or ""
+        target = p.get("target_direction") or "未设定"
+
+        bg_parts = []
+        if grade:
+            bg_parts.append(grade)
+        if school:
+            bg_parts.append(school)
+        if major:
+            bg_parts.append(major)
+
+        bg_line = f"【用户背景】{nickname}"
+        if bg_parts:
+            bg_line += f"，{'、'.join(bg_parts)}"
+        bg_line += f"\n目标方向：{target}"
+        parts.append(bg_line)
+
+        skills_data = p.get("current_skills")
+        if skills_data and isinstance(skills_data, list):
+            names = [
+                s.get("skill", "")
+                for s in skills_data
+                if isinstance(s, dict) and s.get("skill")
+            ]
+            if names:
                 parts.append(f"已掌握技能：{'、'.join(names)}")
 
-    # 对话摘要：由 chat_service 在消息数超过窗口时自动生成并写入 Conversation.summary
     if conversation_summary:
-        summary = conversation_summary[:500]  # 防 LLM 失控膨胀（HIGH 3）
-        parts.append(f"\n【对话摘要】{summary}")
+        summary = conversation_summary[:500]
+        parts.append(f"【对话摘要】{summary}")
 
-    # Skill 正文：仅加载当前 intent 的 SKILL.md，不是全部 7 个
-    body = _load_skill_body(intent)
-    if body:
-        parts.append(f"\n{body}")
-    else:
-        extra = _INTENT_PROMPTS.get(intent, "")
-        if extra:
-            parts.append(f"\n{extra}")
+    if skill and skill.body:
+        parts.append(f"\n{skill.body}")
+    elif skill and skill.description:
+        parts.append(f"\n当前任务：{skill.description}")
+
     return "\n".join(parts)
+
+
+# ── 统一入口 ──
+
+
+async def run_orchestrator(
+    user_input: str,
+    user_profile: dict | None,
+    conversation_summary: str | None = None,
+) -> tuple[str, str, str]:
+    """
+    一次调用完成：分类 + 加载 skill + 组装 prompt。
+    返回: (intent, task_type, system_prompt)
+    """
+    intent, task_type = await classify(user_input)
+    system = build_system_prompt(user_profile, intent, conversation_summary)
+    return intent, task_type, system
