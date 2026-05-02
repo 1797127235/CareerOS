@@ -1,7 +1,5 @@
 """画像服务 — 简历文本提取 + LLM 解析 + 写 DB"""
-
 from __future__ import annotations
-
 import asyncio
 import logging
 from datetime import datetime
