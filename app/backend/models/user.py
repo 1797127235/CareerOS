@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, DateTime, func, JSON, Enum as SAEnum, Boolean, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.backend.db.base import Base
@@ -53,7 +52,7 @@ class UserProfile(Base):
     target_company_level: Mapped[str | None] = mapped_column(
         String(20)
     )  # top | major | medium | state_owned
-    current_skills: Mapped[dict | None] = mapped_column(JSON)
+    current_skills: Mapped[list | None] = mapped_column(JSON)
     # 扩展画像数据(教育详情/技能场景/...) — 双写存放,不迁移已有列
     # 结构: {"education": {"gpa", "ranking", "awards"[]}, "skills_context": {name: context}}
     profile_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
