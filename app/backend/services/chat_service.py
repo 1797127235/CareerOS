@@ -34,7 +34,7 @@ async def stream_chat(
     # 获取或创建会话
     if conversation_id:
         conv = await db.get(Conversation, conversation_id)
-        if not conv:
+        if not conv or conv.user_id != user_id:
             yield _sse_error("会话不存在")
             return
     else:
@@ -60,17 +60,26 @@ async def stream_chat(
         for msg in reversed(recent)
     ]
 
-    # 1. 先持久化用户消息，避免后续分类/生成失败时整条输入丢失
+    # 1. 先意图分类，再持久化用户消息（附带 intent）
+    #    classify 失败 → 用户消息不落库 → 无孤儿消息
+    intent: str = "consultation"
+    try:
+        intent, task_type = await classify(user_input)
+    except Exception:
+        logger.exception("意图分类失败: conversation_id=%s", conv.conversation_id)
+        yield _sse_error("服务暂不可用，请稍后重试")
+        return
+
     user_message = Message(
         conversation_id=conv.conversation_id,
         role="user",
         content=user_input,
+        intent=intent,
     )
-
+    db.add(user_message)
+    conv.message_count = (conv.message_count or 0) + 1
+    conv.last_message_at = datetime.now(timezone.utc)
     try:
-        db.add(user_message)
-        conv.message_count = (conv.message_count or 0) + 1
-        conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
     except Exception:
         logger.exception("保存用户消息失败: conversation_id=%s", conv.conversation_id)
@@ -78,11 +87,8 @@ async def stream_chat(
         yield _sse_error("消息保存失败，请稍后重试")
         return
 
-    # 2. 意图分类 + 流式生成 + 保存 AI 回复
+    # 2. 流式生成 + 保存 AI 回复
     try:
-        intent, task_type = await classify(user_input)
-        user_message.intent = intent
-
         user_profile = await _load_user_profile(db, user_id)
         system = build_system_prompt(user_profile, intent)
         messages = [{"role": "system", "content": system}] + history_messages + [

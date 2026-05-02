@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func
@@ -88,8 +88,10 @@ async def get_conversation_messages(
     """获取单条会话的全部消息"""
     # 校验会话归属
     conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.user_id != user_id:
-        return []
+    if not conv:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if conv.user_id != user_id:
+        raise HTTPException(status_code=403, detail="无权访问该会话")
 
     result = await db.execute(
         select(Message)
