@@ -139,8 +139,8 @@ def _load_skill_body(intent: str) -> str:
     return body
 
 
-def build_system_prompt(user_profile: dict | None, intent: str) -> str:
-    """组装系统提示词 — 分类 prompt 常驻 + Skill 正文按需加载"""
+def build_system_prompt(user_profile: dict | None, intent: str, conversation_summary: str | None = None) -> str:
+    """组装系统提示词 — 分类 prompt 常驻 + Skill 正文按需加载 + 对话摘要"""
     parts = [
         "你是「码路领航」职业规划学长 Agent，一名研二计算机学长，在大厂实习过。",
         "风格：亲切、有干货、用大白话讲技术、不装腔作势。",
@@ -159,6 +159,11 @@ def build_system_prompt(user_profile: dict | None, intent: str) -> str:
             if isinstance(skills, list):
                 names = [s.get("skill", "") for s in skills]
                 parts.append(f"已掌握技能：{'、'.join(names)}")
+
+    # 对话摘要：由 chat_service 在消息数超过窗口时自动生成并写入 Conversation.summary
+    if conversation_summary:
+        summary = conversation_summary[:500]  # 防 LLM 失控膨胀（HIGH 3）
+        parts.append(f"\n【对话摘要】{summary}")
 
     # Skill 正文：仅加载当前 intent 的 SKILL.md，不是全部 7 个
     body = _load_skill_body(intent)

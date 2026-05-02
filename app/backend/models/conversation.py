@@ -25,6 +25,7 @@ class Conversation(Base):
     context_snapshot: Mapped[dict | None] = mapped_column(JSON)
     message_count: Mapped[int] = mapped_column(default=0)
     is_pinned: Mapped[bool] = mapped_column(default=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

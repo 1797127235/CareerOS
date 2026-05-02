@@ -187,7 +187,7 @@ function AssistantBubble({ text, streaming }: { text: string; streaming: boolean
       <div className="h-px w-12 bg-border mb-sm" />
       <div className="text-base whitespace-pre-wrap">
         {text}
-        {streaming ? <span className="ink-cursor" /> : null}
+        {streaming && text ? <span className="ink-cursor" /> : null}
       </div>
       {streaming && !text ? (
         <span className="text-text-muted ink-cursor">正在写</span>
