@@ -159,26 +159,13 @@ export default function Chat() {
         <div ref={endRef} />
       </div>
 
-      <div className="mt-xl pt-md border-t border-border">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="跟我说说..."
-          rows={2}
-          className="w-full resize-none text-base leading-relaxed placeholder:text-text-subtle"
+      <div className="mt-xl">
+        <InputBox
+          draft={draft}
+          onChange={setDraft}
+          onSend={send}
+          streaming={streaming}
         />
-        <div className="flex justify-between items-center text-xs text-text-subtle">
-          <span>Enter 发送 · Shift+Enter 换行</span>
-          <button
-            onClick={send}
-            disabled={streaming || !draft.trim()}
-            className="text-ink hover:text-ink-deep disabled:text-text-subtle disabled:cursor-not-allowed"
-            aria-label="发送"
-          >
-            {streaming ? '…' : '↩'}
-          </button>
-        </div>
       </div>
     </div>
   )
@@ -288,4 +275,109 @@ function formatTime(iso: string | null): string {
 
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n)
+}
+
+// ── 输入框 ──
+
+const PLACEHOLDERS = [
+  '说说你的近况…',
+  '粘贴一段 JD，我帮你诊断匹配度',
+  '想去大厂后端，还差什么？',
+  '简历怎么改才能过初筛？',
+]
+
+function InputBox({
+  draft,
+  onChange,
+  onSend,
+  streaming,
+}: {
+  draft: string
+  onChange: (v: string) => void
+  onSend: () => void
+  streaming: boolean
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const [phIndex, setPhIndex] = useState(0)
+  const [focused, setFocused] = useState(false)
+
+  // 轮播 placeholder
+  useEffect(() => {
+    if (draft) return
+    const id = setInterval(() => {
+      setPhIndex((i) => (i + 1) % PLACEHOLDERS.length)
+    }, 4000)
+    return () => clearInterval(id)
+  }, [draft])
+
+  // auto-grow
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [draft])
+
+  const canSend = draft.trim().length > 0 && !streaming
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      if (canSend) onSend()
+    }
+  }
+
+  return (
+    <div
+      className={`
+        relative rounded-2xl border transition-colors duration-200
+        ${focused
+          ? 'border-ink/40 bg-surface shadow-sm'
+          : 'border-border bg-surface/50'
+        }
+      `}
+    >
+      <textarea
+        ref={ref}
+        value={draft}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={PLACEHOLDERS[phIndex]}
+        rows={1}
+        className="w-full resize-none bg-transparent px-4 py-3 text-base leading-relaxed placeholder:text-text-subtle/60 focus:outline-none"
+        style={{ maxHeight: '200px' }}
+      />
+
+      <div className="flex items-center justify-between px-3 pb-2 pt-0">
+        <span className="text-[11px] text-text-subtle/60 select-none">
+          {draft.length > 0 ? `${draft.length} 字` : 'Shift + Enter 换行'}
+        </span>
+
+        <button
+          onClick={onSend}
+          disabled={!canSend}
+          className={`
+            flex items-center justify-center rounded-full transition-all duration-150
+            ${canSend
+              ? 'bg-ink text-bg hover:bg-ink-deep hover:scale-105'
+              : 'bg-border text-text-subtle cursor-not-allowed'
+            }
+            w-8 h-8
+          `}
+          aria-label="发送"
+        >
+          {streaming ? (
+            <span className="animate-pulse">…</span>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 2L11 13" />
+              <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  )
 }

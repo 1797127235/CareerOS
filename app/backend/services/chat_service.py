@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.agent.orchestrator import run_orchestrator
-from app.backend.agent.llm_router import chat_stream, chat as llm_chat
+from app.backend.agent.llm_router import chat_stream, chat as llm_chat, TaskType
 from app.backend.models.conversation import Conversation, Message
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,9 @@ async def stream_chat(
     SSE 流式对话：
     1. 获取/创建会话
     2. 加载历史上下文
-    3. LangGraph 意图分类
-    4. 组装系统提示词 → chat_stream 真流式生成
-    5. 存 DB
+    3. run_orchestrator：画像加载 + 意图分类 + 系统提示词组装
+    4. chat_stream 流式生成
+    5. 存 DB + 滚动摘要
     """
     # 获取或创建会话
     if conversation_id:
@@ -122,7 +123,7 @@ async def stream_chat(
 
         full_content = ""
         try:
-            async for token in chat_stream(task_type, messages):
+            async for token in chat_stream(cast(TaskType, task_type), messages):
                 full_content += token
                 yield _sse_token(token, conv.conversation_id)
         finally:
@@ -207,9 +208,14 @@ async def _fetch_old_messages(db: AsyncSession, conv: Conversation) -> list[Mess
 
 
 def _format_messages(messages: list[Message]) -> str:
-    """消息列表 → user: xxx\nassistant: xxx"""
+    """消息列表 → user: xxx\nassistant: xxx，清洗文件名引用防止 LLM 误读。"""
+    import re
+    def _clean(content: str) -> str:
+        content = re.sub(r'[\[【].*?\.(?:pdf|docx?|png|jpg|txt)[\]】]', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'\[PDF\s*\d+\]', '', content, flags=re.IGNORECASE)
+        return content
     return "\n".join(
-        f"{'user' if msg.role == 'user' else 'assistant'}: {(msg.content or '')[:_MAX_MSG_CHARS]}"
+        f"{'user' if msg.role == 'user' else 'assistant'}: {_clean((msg.content or '')[:_MAX_MSG_CHARS])}"
         for msg in messages
     )
 

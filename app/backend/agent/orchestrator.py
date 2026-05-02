@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+from typing import cast
 
 import yaml
 
-from app.backend.agent.llm_router import get_model, _get_client
+from app.backend.agent.llm_router import get_model, _get_client, TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +86,27 @@ def _parse_skill_md(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+def _sanitize_summary(text: str) -> str:
+    """清洗摘要中的文件引用，防止 LLM 误认为需要读取文件。"""
+    # 去掉 PDF/DOCX 文件名引用
+    text = re.sub(r'[\[【].*?\.(?:pdf|docx?|png|jpg|txt)[\]】]', '', text, flags=re.IGNORECASE)
+    # 去掉 "[PDF N]" 格式的引用标记
+    text = re.sub(r'\[PDF\s*\d+\]', '', text, flags=re.IGNORECASE)
+    return text
+
+
 # ── 意图分类 ──
+def _validate_task_type(raw: str) -> TaskType:
+    """确保 task_type 是 TaskType 字面量，否则回退到 general_chat。"""
+    valid = TaskType.__args__  # type: ignore[attr-defined]
+    return cast(TaskType, raw if raw in valid else "general_chat")
 
 
-async def classify(user_input: str) -> tuple[str, str]:
+async def classify(user_input: str) -> tuple[str, TaskType]:
     """输入文本 → 返回 (intent, task_type)。"""
     skills = discover_skills()
     if not skills:
-        return "consultation", "general_chat"
+        return "consultation", _validate_task_type("general_chat")
 
     intent = await _classify_llm(user_input, skills)
     skill = skills.get(intent)
@@ -102,7 +118,7 @@ async def classify(user_input: str) -> tuple[str, str]:
                 break
         if skill is None:
             skill = skills.get("consultation") or next(iter(skills.values()))
-    return skill.intent, skill.task_type
+    return skill.intent, _validate_task_type(skill.task_type)
 
 
 async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
@@ -144,6 +160,7 @@ def build_system_prompt(
 
     parts = [
         "你是「码路领航」职业规划学长 Agent，一名研二计算机学长，在大厂实习过。",
+        f"今天是 {date.today().isoformat()}。涉及市场行情、薪资、技术栈热度时，请基于这个时间点判断。",
         "风格：亲切、有干货、用大白话讲技术、不装腔作势。",
         "回答格式：【一句话总结】→ 详细解释 → 个性化建议 → 下一步行动。",
     ]
@@ -180,8 +197,14 @@ def build_system_prompt(
             if names:
                 parts.append(f"已掌握技能：{'、'.join(names)}")
 
+        # ⚠️ 画像仅供参考，不要强行关联
+        parts.append(
+            "以上是用户画像。如果用户当前问题与画像内容无关（例如换了话题、"
+            "问的是行业趋势而非个人情况），不要强行关联画像，直接回答问题。"
+        )
+
     if conversation_summary:
-        summary = conversation_summary[:500]
+        summary = _sanitize_summary(conversation_summary[:500])
         parts.append(f"【对话摘要】{summary}")
 
     if skill and skill.body:
@@ -199,7 +222,7 @@ async def run_orchestrator(
     user_input: str,
     user_profile: dict | None,
     conversation_summary: str | None = None,
-) -> tuple[str, str, str]:
+) -> tuple[str, TaskType, str]:
     """
     一次调用完成：分类 + 加载 skill + 组装 prompt。
     返回: (intent, task_type, system_prompt)
