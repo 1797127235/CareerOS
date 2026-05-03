@@ -1,7 +1,6 @@
 """LLM 路由 — 按用途自动选择模型（LiteLLM 统一抽象层）"""
 
 from __future__ import annotations
-
 import asyncio
 import logging
 from typing import Literal
@@ -63,6 +62,7 @@ async def chat_stream(
                 api_key=settings.dashscope_api_key,
                 base_url=settings.dashscope_base_url,
                 stream=True,
+                timeout=60,
             )
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -100,6 +100,7 @@ async def chat(
                 api_key=settings.dashscope_api_key,
                 base_url=settings.dashscope_base_url,
                 stream=False,
+                timeout=60,
             )
             return response.choices[0].message.content or ""
         except Exception as e:
