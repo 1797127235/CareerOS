@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""数据导入脚本 — 一键将 data/ 目录下所有 JSON 文件灌入 Document/Chunk 表 + Chroma 向量库
+"""数据导入脚本 — 一键将 data/ 目录下所有 JSON 文件灌入 Chroma 向量库 + Document/Chunk 表
 
 用法:
     python scripts/import_knowledge_base.py
@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -19,9 +20,19 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.backend.agent.rag import ingest_knowledge_base
 from app.backend.config import get_settings
 from app.backend.db.base import Base
-from app.backend.services.ingestion_pipeline import ingest_all_data_files
+from app.backend.services.chunk_service import estimate_token_count, split_text
+from app.backend.services.document_service import (
+    _extract_metadata,
+    _map_category,
+    create_chunk,
+    create_document,
+    update_document_status,
+)
+
+DATA_DIR = project_root / "data"
 
 
 async def main():
@@ -29,25 +40,39 @@ async def main():
     engine = create_async_engine(settings.database_url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # 确保表已创建
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async with async_session() as session:
-        results = await ingest_all_data_files(session)
+    # Phase 1: Chroma 向量库（LlamaIndex 自动处理 chunking + embedding）
+    doc_count = ingest_knowledge_base(DATA_DIR)
 
-        total_docs = sum(len(docs) for docs in results.values())
-        total_chunks = sum(sum(d["chunk_count"] for d in docs) for docs in results.values())
+    # Phase 2: SQL 审计库（Document + Chunk 元数据）
+    async with async_session() as db:
+        for fp in sorted(DATA_DIR.glob("*.json")):
+            items = json.loads(fp.read_text(encoding="utf-8"))
+            for item in items:
+                doc = await create_document(
+                    db=db,
+                    title=item.get("title", "Untitled"),
+                    category=_map_category(item.get("category", "")),
+                    source_type="knowledge_base",
+                    source_path=str(fp.relative_to(project_root)),
+                    file_type="json",
+                    metadata=_extract_metadata(item),
+                )
+                chunks_text = split_text(item.get("content", ""))
+                for idx, ct in enumerate(chunks_text):
+                    await create_chunk(
+                        db=db,
+                        document_id=doc.id,
+                        content=ct,
+                        chunk_index=idx,
+                        token_count=estimate_token_count(ct),
+                    )
+                await update_document_status(db, doc.id, status="indexed", chunk_count=len(chunks_text))
+        await db.commit()
 
-        print("=" * 50)
-        print("知识库导入完成")
-        print("=" * 50)
-        for filename, docs in results.items():
-            chunk_count = sum(d["chunk_count"] for d in docs)
-            print(f"  {filename:20s} → {len(docs):3d} 文档, {chunk_count:4d} 块")
-        print("-" * 50)
-        print(f"  总计: {total_docs} 文档, {total_chunks} 块")
-        print("=" * 50)
+    print(f"{doc_count} 文档导入完成（Chroma 向量库 + SQL 审计库）")
 
 
 if __name__ == "__main__":

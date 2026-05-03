@@ -1,74 +1,177 @@
-"""RAG 基础设施 — 知识库检索（MVP 简化版：不依赖向量库）"""
+"""RAG 知识库检索 — 基于 LlamaIndex + Chroma + DashScope
+
+架构：
+- 向量化：DashScopeEmbedding (text-embedding-v4)
+- 向量库：ChromaVectorStore (PersistentClient)
+- 切割：SentenceSplitter
+- 索引：VectorStoreIndex
+- 检索：as_retriever()
+"""
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
-from app.backend.agent.llm_router import embed
+import chromadb
+from llama_index.core import Document as LlamaDocument
+from llama_index.core import Settings, VectorStoreIndex
+from llama_index.core.ingestion import IngestionPipeline
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.embeddings.dashscope import DashScopeEmbedding
+from llama_index.vector_stores.chroma import ChromaVectorStore
+
+from app.backend.config import get_settings
+
+# 配置
+DATA_DIR = Path(__file__).parents[3] / "data"
+CHROMA_DIR = "./chroma_db"
+COLLECTION = "career_os_knowledge"
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 50
+
+# 全局单例（懒加载）
+_retriever = None
+_vector_store = None
+_settings_done = False
+
+
+def _ensure_settings() -> None:
+    """配置 LlamaIndex 全局设置（仅首次调用）"""
+    global _settings_done
+    if _settings_done:
+        return
+    cfg = get_settings()
+    Settings.embed_model = DashScopeEmbedding(
+        model_name="text-embedding-v4",
+        api_key=cfg.dashscope_api_key,
+    )
+    _settings_done = True
+
+
+def _get_vector_store() -> ChromaVectorStore:
+    """获取或创建 Chroma vector store"""
+    global _vector_store
+    if _vector_store is None:
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        collection = client.get_or_create_collection(COLLECTION)
+        _vector_store = ChromaVectorStore(chroma_collection=collection)
+    return _vector_store
+
+
+def _get_retriever():
+    """获取检索器（懒加载）"""
+    global _retriever
+    _ensure_settings()
+    if _retriever is None:
+        vs = _get_vector_store()
+        index = VectorStoreIndex.from_vector_store(vs)
+        _retriever = index.as_retriever(similarity_top_k=5)
+    return _retriever
+
+
+# ─── 公开 API ─────────────────────────────────────────────
+
+
+def ingest_knowledge_base(data_dir: Path = DATA_DIR) -> int:
+    """一键导入：加载 data/*.json → Chunking → 向量化 → Chroma
+
+    Returns: 导入的文档数
+    """
+    global _retriever
+    _ensure_settings()
+
+    # 1. 加载 JSON → LlamaIndex Document
+    ldocs = []
+    for fp in sorted(data_dir.glob("*.json")):
+        items = json.loads(fp.read_text(encoding="utf-8"))
+        for item in items:
+            ldocs.append(
+                LlamaDocument(
+                    text=item.get("content", ""),
+                    metadata={
+                        "title": item.get("title", ""),
+                        "category": item.get("category", ""),
+                        "subcategory": item.get("subcategory", ""),
+                        "source_file": fp.name,
+                    },
+                )
+            )
+
+    # 2. Chunking + 向量化 + 写入 Chroma
+    vs = _get_vector_store()
+    pipeline = IngestionPipeline(
+        transformations=[
+            SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP),
+        ],
+        vector_store=vs,
+    )
+    pipeline.run(documents=ldocs)
+
+    # 3. 刷新 retriever
+    index = VectorStoreIndex.from_vector_store(vs)
+    _retriever = index.as_retriever(similarity_top_k=5)
+
+    return len(ldocs)
+
+
+async def search(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+    """语义检索 — 返回 top_k 条匹配的文本块"""
+    retriever = _get_retriever()
+    retriever.similarity_top_k = top_k
+    nodes = retriever.retrieve(query)
+
+    return [
+        {
+            "content": node.text,
+            "title": node.metadata.get("title", ""),
+            "category": node.metadata.get("category", ""),
+            "score": round(node.score or 0, 4),
+        }
+        for node in nodes
+    ]
+
+
+def reset_index() -> None:
+    """清空向量库并重置 retriever"""
+    global _retriever, _vector_store
+    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    with contextlib.suppress(Exception):
+        client.delete_collection(COLLECTION)
+    _vector_store = None
+    _retriever = None
+
+
+# ─── 向后兼容别名 ─────────────────────────────────────────
 
 
 class SimpleRAG:
-    """简化版 RAG：本地 JSON 知识库 + 向量相似度检索
-    MVP 阶段先用内存 + JSON 文件，后续替换为 Milvus
-    """
+    """向后兼容适配器：对外暴露与旧版一致的 search() 接口"""
 
-    def __init__(self, kb_path: str | None = None):
-        self._docs: list[dict[str, Any]] = []
-        self._embeddings: list[list[float]] = []
-        if kb_path:
-            self._load(kb_path)
+    def __init__(self) -> None:
+        _ensure_settings()
 
-    def _load(self, path: str):
-        p = Path(path)
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            self._docs = data if isinstance(data, list) else data.get("documents", [])
-
-    async def add_document(self, doc: dict[str, Any]):
-        """添加一条文档并计算向量"""
-        text = doc.get("title", "") + " " + doc.get("content", "")
-        vec = await embed(text)
-        self._docs.append(doc)
-        self._embeddings.append(vec)
-
-    async def search(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
-        """语义搜索，返回 top_k 条相关文档"""
-        if not self._docs:
-            return []
-
-        query_vec = await embed(query)
-        scores = []
-        for i, doc_vec in enumerate(self._embeddings):
-            score = self._cosine_sim(query_vec, doc_vec)
-            scores.append((score, i))
-
-        scores.sort(key=lambda x: x[0], reverse=True)
-        results = []
-        for score, idx in scores[:top_k]:
-            results.append({**self._docs[idx], "_score": score})
-        return results
-
-    def _cosine_sim(self, a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b, strict=False))
-        na = sum(x * x for x in a) ** 0.5
-        nb = sum(x * x for x in b) ** 0.5
-        return dot / (na * nb) if na and nb else 0.0
-
-
-# 全局单例
-_rag: SimpleRAG | None = None
+    async def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        return await search(query, top_k)
 
 
 def get_rag() -> SimpleRAG:
-    global _rag
-    if _rag is None:
-        kb_path = str(Path(__file__).parents[3] / "data" / "knowledge_base.json")
-        _rag = SimpleRAG(kb_path)
-    return _rag
+    return SimpleRAG()
 
 
-def init_rag(kb_path: str):
-    global _rag
-    _rag = SimpleRAG(kb_path)
+def init_rag(kb_path: str | None = None) -> None:
+    """初始化 RAG（首次调用时加载 data/ 目录）"""
+    global _retriever
+    if kb_path:
+        data_dir = Path(kb_path) if Path(kb_path).is_dir() else Path(kb_path).parent
+    else:
+        data_dir = DATA_DIR
+    # 如果 Chroma 为空，执行首次导入
+    _ensure_settings()
+    vs = _get_vector_store()
+    if vs._collection.count() == 0:
+        ingest_knowledge_base(data_dir)
+    else:
+        _get_retriever()  # 加载已有索引
