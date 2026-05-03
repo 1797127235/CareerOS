@@ -1,3 +1,6 @@
+# CodePilot 一键启动（分开窗口，避免 reload 冲突）
+# 用法：在 PowerShell 中运行 .\run.ps1
+
 $host.UI.RawUI.WindowTitle = "CodePilot"
 Set-Location $PSScriptRoot
 
@@ -23,17 +26,11 @@ Write-Host ""
 Write-Host "  Backend  -> http://localhost:8001/docs"
 Write-Host "  Frontend -> http://localhost:5173"
 Write-Host ""
-Write-Host "Press Ctrl+C to stop"
+Write-Host "Close each window to stop"
 Write-Host "=============================="
 
-$backend = Start-Process -FilePath "python" -ArgumentList "-m","uvicorn","app.backend.main:app","--host","0.0.0.0","--port","8001","--reload" -WorkingDirectory $PSScriptRoot -PassThru -NoNewWindow
-$frontend = Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev" -WorkingDirectory "$PSScriptRoot\app/frontend" -PassThru -NoNewWindow
+# 启动后端（新窗口）
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8001 --reload"
 
-try {
-    while (-not $backend.HasExited -and -not $frontend.HasExited) {
-        Start-Sleep -Seconds 1
-    }
-} finally {
-    if (-not $backend.HasExited) { Stop-Process -Id $backend.Id -ErrorAction SilentlyContinue }
-    if (-not $frontend.HasExited) { Stop-Process -Id $frontend.Id -ErrorAction SilentlyContinue }
-}
+# 启动前端（新窗口）
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\app\frontend'; npm run dev"
