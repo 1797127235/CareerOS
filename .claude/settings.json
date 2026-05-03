@@ -1,7 +1,8 @@
 {
   "enabledPlugins": {
     "agent-orchestration@claude-code-workflows": true,
-    "superpowers@claude-plugins-official": false
+    "superpowers@claude-plugins-official": false,
+    "everything-claude-code@everything-claude-code": false
   },
   "extraKnownMarketplaces": {
     "claude-code-workflows": {

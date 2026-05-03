@@ -1,13 +1,9 @@
 """RAG 基础设施 — 知识库检索（MVP 简化版：不依赖向量库）"""
-
 from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any
-
 from app.backend.agent.llm_router import embed
-
 
 class SimpleRAG:
     """简化版 RAG：本地 JSON 知识库 + 向量相似度检索

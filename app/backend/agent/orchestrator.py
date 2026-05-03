@@ -129,11 +129,9 @@ def _sanitize_summary(text: str) -> str:
 
 # ── 意图分类 ──
 
-
 def _validate_task_type(raw: str) -> TaskType:
     """
     将 SKILL 里配置的 task_type 约束为 llm_router 认识的 TaskType。
-
     TypedAlias 在运行时可枚举合法字面量；非法字符串统一回退 general_chat，防止路由崩溃。
     """
     valid = TaskType.__args__  # type: ignore[attr-defined]
@@ -194,8 +192,6 @@ async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
 
 
 # ── Prompt 组装 ──
-
-
 def build_system_prompt(
     user_profile: dict | None,
     intent: str,
@@ -271,8 +267,6 @@ def build_system_prompt(
 
 
 # ── 统一入口 ──
-
-
 async def run_orchestrator(
     user_input: str,
     user_profile: dict | None,
