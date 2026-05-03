@@ -72,13 +72,6 @@ export default function Chat() {
     })
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      send()
-    }
-  }
-
   async function loadConversation(id: string) {
     try {
       const items = await getConversation(id)

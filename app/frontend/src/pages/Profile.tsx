@@ -77,6 +77,7 @@ const MOCK_PROFILE: ExtendedProfile = {
   gpa: '3.8/4.0',
   ranking: '前 15%',
   awards: ['国家奖学金 2024', 'ACM-ICPC 区域赛银牌', '蓝桥杯省一'],
+  bio: 'CS 大三学生，目标后端方向，有字节实习经历',
   city: '北京 / 上海',
   expected_salary: '25-35k',
   english_level: 'CET-6',
@@ -97,12 +98,16 @@ const MOCK_PROFILE: ExtendedProfile = {
     {
       period: '2023.09 — 2024.01',
       title: '校园二手书交易平台',
+      tech_stack: 'Spring Boot, MySQL, Redis',
+      role: '后端开发',
       description:
         '小组 4 人项目,我负责后端.Spring Boot + MySQL + Redis,上线后注册用户 2k+.',
     },
     {
       period: '2023.03 — 2023.06',
       title: '分布式任务调度系统(课程项目)',
+      tech_stack: 'Go, Raft',
+      role: '独立开发',
       description: '基于 Raft 协议自实现小型分布式调度器,Go 写的.结课最高分.',
     },
   ],
