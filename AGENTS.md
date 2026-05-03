@@ -36,7 +36,9 @@ career-os/
 │   │   ├── conversation.py   # Conversation + Message
 │   │   ├── jd_diagnosis.py   # JDDiagnosis
 │   │   ├── job_target.py     # JobTarget 岗位追踪卡片
-│   │   └── document.py       # Document + Chunk 知识库文档/文本块
+│   │   ├── document.py       # Document + Chunk 知识库文档/文本块
+│   │   ├── skill_record.py   # SkillRecord 技能成长记录
+│   │   └── project.py        # Project 项目经历
 │   ├── agent/
 │   │   ├── llm_router.py    # LLM 路由（qwen-plus/qwen-max），流式+非流式，embed 向量化
 │   │   ├── orchestrator.py  # Agent 编排 + Skill 系统（7 个 Skill 按需加载）
@@ -46,7 +48,11 @@ career-os/
 │   │   ├── health.py        # GET /api/health
 │   │   ├── chat.py          # POST /api/chat (SSE), GET /api/chat/history, GET /api/chat/{id}
 │   │   ├── profile.py       # POST /api/profile/resume, GET/PATCH/DELETE /api/profile/me
-│   │   └── jd.py            # POST /api/jd/diagnose
+│   │   ├── jd.py            # POST /api/jd/diagnose
+│   │   ├── targets.py       # GET/POST/PATCH/DELETE /api/targets
+│   │   ├── skills.py        # GET/POST/PATCH/DELETE /api/skills
+│   │   ├── projects.py      # GET/POST/PATCH/DELETE /api/projects
+│   │   └── config_router.py # GET/POST /api/config
 │   ├── schemas/
 │   │   ├── profile.py       # ProfileResponse, ProfileUpdate, SkillItem（含 context）
 │   │   └── jd.py            # JDDiagnoseRequest, JDDiagnoseResponse, GapSkill
@@ -55,6 +61,8 @@ career-os/
 │   │   ├── profile_service.py  # 简历提取 + LLM 解析 + DB 写入 + 重置
 │   │   ├── jd_service.py    # JD 诊断：画像 + JD → LLM → 匹配评分 + 缺口 + 建议
 │   │   ├── target_service.py  # 岗位追踪卡片 CRUD + AI 建议
+│   │   ├── skill_service.py  # 技能记录 CRUD
+│   │   ├── project_service.py  # 项目经历 CRUD
 │   │   └── document_service.py  # 知识库文档/块 DB 操作（审计）
 │   └── agent/skills/        # 7 个 SKILL.md 目录（按意图目录名匹配）
 ├── app/frontend/
@@ -96,6 +104,14 @@ career-os/
 | `DELETE` | `/api/targets/{target_id}?user_id=` | 删除卡片 |
 | `GET`  | `/api/config` | 获取当前用户配置 |
 | `POST` | `/api/config` | 更新用户配置（API Key 等） |
+| `GET`  | `/api/skills?user_id=` | 获取用户所有技能记录 |
+| `POST` | `/api/skills?user_id=` | 创建技能记录 |
+| `PATCH` | `/api/skills/{skill_id}?user_id=` | 更新技能记录 |
+| `DELETE` | `/api/skills/{skill_id}?user_id=` | 删除技能记录 |
+| `GET`  | `/api/projects?user_id=` | 获取用户所有项目经历 |
+| `POST` | `/api/projects?user_id=` | 创建项目经历 |
+| `PATCH` | `/api/projects/{project_id}?user_id=` | 更新项目经历 |
+| `DELETE` | `/api/projects/{project_id}?user_id=` | 删除项目经历 |
 
 ## Key Architecture Decisions
 

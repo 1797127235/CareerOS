@@ -203,15 +203,17 @@ async def ingest_user_memory(db: AsyncSession, user_id: str) -> int:
     if profile:
         ldocs.extend(_profile_to_docs(profile))
 
-    # 2. 技能记录（待实现）
-    # from app.backend.models.skill_record import SkillRecord
-    # result = await db.execute(select(SkillRecord).where(SkillRecord.user_id == user_id))
-    # ldocs.extend(_skills_to_docs(result.scalars().all()))
+    # 2. 技能记录
+    from app.backend.models.skill_record import SkillRecord
 
-    # 3. 项目经历（待实现）
-    # from app.backend.models.project import Project
-    # result = await db.execute(select(Project).where(Project.user_id == user_id))
-    # ldocs.extend(_projects_to_docs(result.scalars().all()))
+    result = await db.execute(select(SkillRecord).where(SkillRecord.user_id == user_id))
+    ldocs.extend(_skills_to_docs(result.scalars().all()))
+
+    # 3. 项目经历
+    from app.backend.models.project import Project
+
+    result = await db.execute(select(Project).where(Project.user_id == user_id))
+    ldocs.extend(_projects_to_docs(result.scalars().all()))
 
     # 4. 对话历史（最近 50 条）
     from app.backend.models.conversation import Message
