@@ -40,6 +40,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]  # 脚本需要在 sys.path.insert 后导入
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
