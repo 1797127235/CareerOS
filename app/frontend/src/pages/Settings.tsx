@@ -46,7 +46,7 @@ export default function Settings() {
   if (loading) return null;
 
   return (
-    <div className="max-w-lg mx-auto px-md py-xl">
+    <div className="w-full max-w-[32rem] mx-auto px-md py-xl">
       <h1 className="text-xl font-han text-ink mb-md">设置</h1>
 
       {error && (
@@ -56,27 +56,38 @@ export default function Settings() {
       )}
 
       <div className="space-y-lg">
-        <div>
-          <label className="block text-sm text-text-subtle mb-xs">DashScope API Key</label>
-          {hasKey ? (
-            <div className="flex items-center gap-sm text-sm text-green">
-              <span className="w-2 h-2 rounded-full bg-green" />
-              已配置
-            </div>
-          ) : (
+        {/* API Key 卡片 */}
+        <div className="border border-border rounded-lg p-lg bg-surface-elevated">
+          <div className="flex items-center justify-between mb-sm">
+            <h2 className="text-base font-medium text-text">DashScope API Key</h2>
+            {hasKey ? (
+              <div className="flex items-center gap-xs text-sm text-green">
+                <span className="w-2 h-2 rounded-full bg-green" />
+                已配置
+              </div>
+            ) : (
+              <div className="flex items-center gap-xs text-sm text-warning">
+                <span className="w-2 h-2 rounded-full bg-warning" />
+                未配置
+              </div>
+            )}
+          </div>
+
+          {!hasKey && (
             <p className="text-sm text-text-muted mb-sm">
               CareerOS 使用阿里云 DashScope 提供 AI 能力。
               <a
                 href="https://dashscope.aliyun.com/"
                 target="_blank"
                 rel="noreferrer"
-                className="text-blue ml-xs"
+                className="text-ink ml-xs"
               >
-                免费获取 API Key →
+                免费获取 →
               </a>
             </p>
           )}
-          <div className="flex gap-sm mt-sm">
+
+          <div className="flex gap-sm">
             <input
               type="password"
               value={apiKey}
@@ -94,18 +105,16 @@ export default function Settings() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm text-text-subtle mb-xs">数据存储</label>
-          <p className="text-sm text-text-muted font-mono">
-            ~/.careeros/
-            <br />
-            ├── career_os.db
-            <br />
-            ├── chroma_db/
-            <br />
-            └── config.json
-          </p>
-          <p className="text-xs text-text-muted mt-xs">
+        {/* 数据存储卡片 */}
+        <div className="border border-border rounded-lg p-lg bg-surface-elevated">
+          <h2 className="text-base font-medium text-text mb-sm">数据存储</h2>
+          <div className="bg-surface rounded p-sm font-mono text-sm text-text-muted mb-sm">
+            <div>~/.careeros/</div>
+            <div className="pl-sm">├── career_os.db</div>
+            <div className="pl-sm">├── chroma_db/</div>
+            <div className="pl-sm">└── config.json</div>
+          </div>
+          <p className="text-xs text-text-muted">
             所有对话、画像、岗位数据均存储在此目录。备份或迁移只需复制整个 ~/.careeros 文件夹。
           </p>
         </div>

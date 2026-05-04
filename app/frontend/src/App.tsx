@@ -31,7 +31,7 @@ function App() {
         </nav>
       </header>
 
-      <main className="flex-1 ink-fade-in">
+      <main className="flex-1 w-full ink-fade-in">
         <Outlet />
       </main>
     </div>
