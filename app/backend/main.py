@@ -11,7 +11,7 @@ from sqlalchemy import text
 from app.backend.config import apply_user_config, get_settings
 from app.backend.db.base import Base, get_engine, init_db
 from app.backend.models import *  # noqa — 确保所有模型注册到 Base
-from app.backend.routers import chat, config_router, health, jd, profile, projects, skills, targets
+from app.backend.routers import chat, config_router, health, jd, memory, profile, projects, skills, targets
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +29,11 @@ async def lifespan(app: FastAPI):
     applied = apply_user_config(settings)
     if applied:
         logger.info("config.json 覆盖: %s", list(applied.keys()))
-    # 记忆索引：首次启动时为用户构建向量索引
-    if settings.dashscope_api_key:
-        from app.backend.agent.rag import ingest_user_memory
-        from app.backend.db.session import get_async_session_maker
+    # Mem0 记忆层初始化
+    from app.backend.agent.mem0_client import init_mem0
 
-        async with get_async_session_maker()() as session:
-            doc_count = await ingest_user_memory(session, user_id="demo_user")
-            if doc_count:
-                logger.info("记忆索引完成：%d 条文档", doc_count)
+    mem0_status = init_mem0()
+    logger.info("Mem0 状态: %s", mem0_status)
     yield
     await engine.dispose()
 
@@ -75,6 +71,7 @@ app.add_middleware(
 # ── API 路由 ──
 
 app.include_router(health.router, prefix="/api")
+app.include_router(memory.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(jd.router, prefix="/api")

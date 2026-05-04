@@ -423,3 +423,36 @@ export async function testConfig(data: {
     body: JSON.stringify(data),
   });
 }
+
+// ── Memory ──
+
+export type MemoryStats = {
+  status: string; // "ready" | "no_api_key" | "error" | "not_initialized"
+  count: number;
+};
+
+export function getMemoryStats(): Promise<MemoryStats> {
+  return http<MemoryStats>(
+    `/api/memory/stats?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export function resetMemory(): Promise<{ deleted: number }> {
+  return http<{ deleted: number }>(
+    `/api/memory/reset?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "POST" },
+  );
+}
+
+export type MemoryItem = {
+  id: string;
+  memory: string;
+  created_at: string | null;
+  categories: string[];
+};
+
+export function getMemoryList(): Promise<MemoryItem[]> {
+  return http<MemoryItem[]>(
+    `/api/memory/list?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}

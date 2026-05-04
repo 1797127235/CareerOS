@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import ReactMarkdown from 'react-markdown'
 import {
   chatStream,
   getChatHistory,
@@ -169,8 +170,8 @@ function AssistantBubble({ text, streaming }: { text: string; streaming: boolean
     <div className="ink-fade-in">
       <div className="text-xs text-text-subtle mb-2xs">学长</div>
       <div className="h-px w-12 bg-border mb-sm" />
-      <div className="text-base whitespace-pre-wrap">
-        {text}
+      <div className="text-base prose prose-sm max-w-none">
+        <ReactMarkdown>{text}</ReactMarkdown>
         {streaming && text ? <span className="ink-cursor" /> : null}
       </div>
       {streaming && !text ? (

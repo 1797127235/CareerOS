@@ -17,8 +17,7 @@ function App() {
         <nav className="flex items-center gap-lg text-base">
           <NavItem to="/" end>对话</NavItem>
           <NavItem to="/profile">画像</NavItem>
-          <NavItem to="/jd">JD 诊断</NavItem>
-          <NavItem to="/targets">岗位追踪</NavItem>
+          <NavItem to="/memories">记忆</NavItem>
           <NavItem to="/settings">设置</NavItem>
           <a
             href={FEEDBACK_URL}

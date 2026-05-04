@@ -88,7 +88,7 @@ async def stream_chat(
     # 1. 加载画像 + 意图分类 + 组装 prompt（失败不落库，无孤儿消息）
     try:
         user_profile = await _load_user_profile(db, user_id)
-        intent, task_type, system = await run_orchestrator(user_input, user_profile, conv.summary)
+        intent, task_type, system = await run_orchestrator(user_input, user_profile, conv.summary, user_id=user_id)
     except Exception:
         logger.exception("编排失败: conversation_id=%s", conv.conversation_id)
         yield _sse_error("服务暂不可用，请稍后重试")
@@ -149,6 +149,11 @@ async def stream_chat(
         task = asyncio.create_task(_summarize_bg(conv.conversation_id))
         task.add_done_callback(_log_task_error)
 
+    # 4. Mem0 记忆提取：fire-and-forget（Story 1.2）
+    if full_content:
+        task = asyncio.create_task(_extract_memory_bg(user_id, user_input, full_content))
+        task.add_done_callback(_log_task_error)
+
     yield _sse_done(conv.conversation_id)
 
 
@@ -185,6 +190,27 @@ async def _summarize_bg(conversation_id: str) -> None:
             await _summarize_and_persist(db, conv)
         except Exception:
             logger.exception("后台摘要失败: conversation_id=%s", conversation_id)
+
+
+async def _extract_memory_bg(user_id: str, user_message: str, assistant_reply: str) -> None:
+    """后台任务：从当轮对话提取记忆写入 Mem0（fire-and-forget）"""
+    from app.backend.agent.mem0_client import get_mem0
+
+    mem0 = get_mem0()
+    if mem0 is None:
+        return  # Mem0 未初始化，静默跳过
+
+    messages = [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": assistant_reply},
+    ]
+
+    try:
+        # mem0.add() 是同步调用，放线程池避免阻塞事件循环
+        await asyncio.to_thread(mem0.add, messages, user_id=user_id)
+        logger.debug("Mem0 记忆提取完成: user_id=%s", user_id)
+    except Exception:
+        logger.error("Mem0 记忆提取失败: user_id=%s", user_id, exc_info=True)
 
 
 async def _fetch_old_messages(db: AsyncSession, conv: Conversation) -> list[Message]:

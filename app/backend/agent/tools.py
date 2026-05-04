@@ -6,10 +6,9 @@ from typing import Any
 
 
 async def knowledge_search(query: str) -> list[dict[str, Any]]:
-    """知识库检索"""
-    from app.backend.agent.rag import get_rag
-
-    return await get_rag().search(query)
+    """知识库检索 — Story 1.3 实现 Mem0 检索前的占位"""
+    # TODO Story 1.3: 替换为 get_mem0().get_all(user_id=..., query=query)
+    return []
 
 
 async def generate_learning_path(params: dict) -> dict:

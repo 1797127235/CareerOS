@@ -11,6 +11,7 @@ Agent 编排引擎 — Skill 自发现 + 意图分类 + Prompt 组装
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -193,11 +194,35 @@ async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
     return content.strip().lower().replace("-", "_")
 
 
+async def _retrieve_mem0(user_input: str, user_id: str) -> list[str]:
+    """语义检索 Mem0 中与 user_input 相关的历史记忆，失败返回空列表。"""
+    from app.backend.agent.mem0_client import get_mem0
+
+    mem0 = get_mem0()
+    if mem0 is None:
+        return []
+
+    try:
+        # mem0.search() 是同步调用，放线程池
+        results = await asyncio.to_thread(mem0.search, user_input, user_id=user_id, limit=5)
+
+        # 兼容两种返回格式：dict{"results": [...]} 或直接 list
+        items = results.get("results", results) if isinstance(results, dict) else results
+
+        memories = [item["memory"].strip() for item in items if item.get("memory", "").strip()]
+        return memories
+
+    except Exception:
+        logger.warning("Mem0 检索失败，回退至无记忆上下文: user_id=%s", user_id)
+        return []
+
+
 # ── Prompt 组装 ──
 def build_system_prompt(
     user_profile: dict | None,
     intent: str,
     conversation_summary: str | None = None,
+    memories: list[str] | None = None,
 ) -> str:
     """
     拼接发给模型的 system 消息内容。
@@ -250,6 +275,13 @@ def build_system_prompt(
             "问的是行业趋势而非个人情况），不要强行关联画像，直接回答问题。"
         )
 
+    # ── Mem0 历史记忆注入 ──────────────────────────
+    if memories:
+        logger.debug("注入 Mem0 记忆 %d 条: %s", len(memories), memories)
+        mem_lines = "\n".join(f"- {m}" for m in memories)
+        parts.append(f"【相关历史记忆】\n{mem_lines}")
+    # ─────────────────────────────────────────────────
+
     if conversation_summary:
         # 控制长度，降低 token；并清洗文件名等噪声
         summary = _sanitize_summary(conversation_summary[:500])
@@ -269,6 +301,7 @@ async def run_orchestrator(
     user_input: str,
     user_profile: dict | None,
     conversation_summary: str | None = None,
+    user_id: str = "demo_user",
 ) -> tuple[str, TaskType, str]:
     """
     编排单次对话所需的静态上下文（不含用户本轮 user 消息）。
@@ -277,6 +310,7 @@ async def run_orchestrator(
         user_input: 用户本轮输入，用于意图分类。
         user_profile: 画像字典，结构与 profile 接口一致；可为 None。
         conversation_summary: 可选的多轮摘要，通常由上层从 DB 或 LLM 维护。
+        user_id: 用户 ID，用于 Mem0 记忆检索过滤。
 
     返回:
         intent: 选中的技能目录名。
@@ -284,5 +318,9 @@ async def run_orchestrator(
         system_prompt: 完整 system 字符串，与 user 消息一起发给聊天接口。
     """
     intent, task_type = await classify(user_input)
-    system = build_system_prompt(user_profile, intent, conversation_summary)
+
+    # 检索相关历史记忆
+    memories = await _retrieve_mem0(user_input, user_id)
+
+    system = build_system_prompt(user_profile, intent, conversation_summary, memories=memories)
     return intent, task_type, system

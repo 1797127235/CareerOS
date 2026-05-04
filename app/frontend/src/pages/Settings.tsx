@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getConfig, updateConfig, testConfig } from "../lib/api";
-import type { Config, ConfigTestResponse } from "../lib/api";
+import { getConfig, updateConfig, testConfig, getMemoryStats, resetMemory } from "../lib/api";
+import type { Config, ConfigTestResponse, MemoryStats } from "../lib/api";
 
 // ── Provider 配置表（与后端同步）──
 const PROVIDER_CONFIG: Record<
@@ -81,6 +81,12 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConfigTestResponse | null>(null);
 
+  // 记忆管理
+  const [memStats, setMemStats] = useState<MemoryStats | null>(null);
+  const [memResetting, setMemResetting] = useState(false);
+  const [memConfirming, setMemConfirming] = useState(false);
+  const [memResetMsg, setMemResetMsg] = useState("");
+
   useEffect(() => {
     getConfig()
       .then((cfg) => {
@@ -94,6 +100,11 @@ export default function Settings() {
       })
       .catch(() => setError("配置加载失败，请刷新重试"))
       .finally(() => setLoading(false));
+
+    // 同时拉取记忆统计（独立请求，失败不影响配置加载）
+    getMemoryStats()
+      .then(setMemStats)
+      .catch(() => setMemStats({ status: "error", count: 0 }));
 
     return () => {
       if (savedTimer.current) window.clearTimeout(savedTimer.current);
@@ -172,6 +183,22 @@ export default function Settings() {
       setTestResult({ ok: false, latency_ms: 0, error: "请求失败" });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleMemReset = async () => {
+    if (memResetting) return;
+    setMemResetting(true);
+    setMemResetMsg("");
+    try {
+      const res = await resetMemory();
+      setMemStats((prev) => (prev ? { ...prev, count: 0 } : null));
+      setMemResetMsg(`已清空 ${res.deleted} 条记忆`);
+      setMemConfirming(false);
+    } catch {
+      setMemResetMsg("清空失败，请查看日志");
+    } finally {
+      setMemResetting(false);
     }
   };
 
@@ -294,6 +321,67 @@ export default function Settings() {
             placeholder={PROVIDER_CONFIG[embeddingProvider]?.baseUrl || "https://..."}
             className="w-full px-sm py-xs border border-border rounded text-sm bg-surface"
           />
+        </div>
+
+        {/* 记忆管理卡片 */}
+        <div className="border border-border rounded-lg p-lg bg-surface-elevated">
+          <h2 className="text-base font-medium text-text mb-md">记忆管理</h2>
+
+          <div className="flex items-center gap-sm mb-md">
+            <span className="text-sm text-text-subtle">状态：</span>
+            <span
+              className={`text-sm ${memStats?.status === "ready" ? "text-green" : "text-text-subtle"}`}
+            >
+              {memStats?.status === "ready"
+                ? "就绪"
+                : memStats?.status === "no_api_key"
+                  ? "未配置 Key"
+                  : memStats?.status === "error"
+                    ? "异常"
+                    : "初始化中"}
+            </span>
+            <span className="text-sm text-text-subtle ml-sm">
+              已记忆 <span className="text-text font-medium">{memStats?.count ?? "—"}</span> 条
+            </span>
+          </div>
+
+          {!memConfirming ? (
+            <button
+              onClick={() => {
+                setMemConfirming(true);
+                setMemResetMsg("");
+              }}
+              disabled={!memStats || memStats.count === 0}
+              className="px-md py-xs border border-border rounded text-sm text-text hover:bg-surface disabled:opacity-40"
+            >
+              清空记忆
+            </button>
+          ) : (
+            <div className="flex items-center gap-sm">
+              <span className="text-sm text-text-subtle">清空后 AI 将忘记所有记录，确认吗？</span>
+              <button
+                onClick={handleMemReset}
+                disabled={memResetting}
+                className="px-md py-xs bg-red/80 text-surface rounded text-sm disabled:opacity-40"
+              >
+                {memResetting ? "清空中..." : "确认清空"}
+              </button>
+              <button
+                onClick={() => setMemConfirming(false)}
+                className="px-md py-xs border border-border rounded text-sm text-text"
+              >
+                取消
+              </button>
+            </div>
+          )}
+
+          {memResetMsg && (
+            <p
+              className={`mt-xs text-sm ${memResetMsg.includes("失败") ? "text-red" : "text-green"}`}
+            >
+              {memResetMsg}
+            </p>
+          )}
         </div>
 
         {/* 保存按钮 */}
