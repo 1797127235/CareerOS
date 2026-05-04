@@ -1,21 +1,20 @@
 """对话服务 — SSE 流式对话 + 历史存 DB + 滚动摘要"""
-
 from __future__ import annotations
-
 import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import cast
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.backend.agent.llm_router import TaskType, chat_stream
+from app.backend.agent.llm_router import TaskType
 from app.backend.agent.llm_router import chat as llm_chat
 from app.backend.agent.orchestrator import run_orchestrator
+from app.backend.agent.agent_loop import agent_loop, AgentResult
+from app.backend.agent.tools import tool_registry
 from app.backend.models.conversation import Conversation, Message
+from app.backend.models.agent_trace import AgentTrace
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ async def stream_chat(
     1. 获取/创建会话
     2. 加载历史上下文
     3. run_orchestrator：画像加载 + 意图分类 + 系统提示词组装
-    4. chat_stream 流式生成
+    4. agent_loop：ReAct 循环（支持工具调用）
     5. 存 DB + 滚动摘要
     """
     # 获取或创建会话
@@ -111,15 +110,34 @@ async def stream_chat(
         yield _sse_error("消息保存失败，请稍后重试")
         return
 
-    # 2. 流式生成 + 保存 AI 回复
+    # 2. Agent Loop 生成 + 保存 AI 回复
     try:
-        messages = [{"role": "system", "content": system}, *history_messages, {"role": "user", "content": user_input}]
-
         full_content = ""
         try:
-            async for token in chat_stream(cast(TaskType, task_type), messages):
-                full_content += token
-                yield _sse_token(token, conv.conversation_id)
+            # agent_loop 现在是异步生成器，yield 流式 token 和最终结果
+            async for item in agent_loop(
+                user_input=user_input,
+                system_prompt=system,
+                history_messages=history_messages,
+                task_type=cast(TaskType, task_type),
+                db=db,
+                user_id=user_id,
+                registry=tool_registry,
+            ):
+                if isinstance(item, str):
+                    # 流式 token，直接 yield 给前端
+                    full_content += item
+                    yield _sse_token(item, conv.conversation_id)
+                elif isinstance(item, AgentResult):
+                    # 最终结果
+                    result = item
+                    # 如果有工具调用，输出提示
+                    for step in result.steps:
+                        if step.step_type == "tool_call" and step.tool_name:
+                            yield _sse_token(f"\n[调用工具: {step.tool_name}]\n", conv.conversation_id)
+                    # 保存追踪记录
+                    await _save_agent_traces(db, conv.conversation_id, user_id, result.steps)
+
         finally:
             # 无论正常完成还是客户端断开，都保存已生成的内容
             if full_content:
@@ -256,15 +274,17 @@ async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
         if not old_messages:
             return
 
-        prompt = _build_summary_prompt(conv.summary, _format_messages(old_messages))
+        prompt = _build_summary_prompt(conv.summary or "", _format_messages(old_messages))
 
         try:
-            summary = await llm_chat(
+            result = await llm_chat(
                 task_type="memory_summarize",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=256,
             )
+            # llm_chat 可能返回 str 或 dict（如果有 tool_calls），确保处理两种情况
+            summary = result if isinstance(result, str) else str(result)
             conv.summary = summary.strip() if summary else None
             await db.commit()
             logger.info("摘要已更新: conversation_id=%s, len=%d", conv.conversation_id, len(summary) if summary else 0)
@@ -288,3 +308,31 @@ def _sse_error(message: str) -> str:
 
 def _sse_done(conversation_id: str) -> str:
     return f"data: {json.dumps({'type': 'done', 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
+
+
+async def _save_agent_traces(
+    db: AsyncSession,
+    conversation_id: str,
+    user_id: str,
+    steps: list,
+) -> None:
+    """保存 Agent 执行追踪记录"""
+    try:
+        for step in steps:
+            trace = AgentTrace(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                step_number=step.step_number,
+                step_type=step.step_type,
+                tool_name=step.tool_name,
+                tool_args=step.tool_args,
+                content=step.content[:5000],  # 截断过长内容
+                duration_ms=step.duration_ms,
+                success=step.success,
+                error_message=step.error,
+            )
+            db.add(trace)
+        await db.flush()
+        logger.debug("Agent 追踪记录已保存: conversation_id=%s, steps=%d", conversation_id, len(steps))
+    except Exception:
+        logger.warning("保存 Agent 追踪记录失败: conversation_id=%s", conversation_id, exc_info=True)

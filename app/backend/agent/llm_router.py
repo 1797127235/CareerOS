@@ -79,8 +79,13 @@ async def chat_stream(
     api_key: str | None = None,
     base_url: str | None = None,
     model: str | None = None,
+    tools: list[dict] | None = None,
 ):
-    """流式调用 LLM，返回 token 迭代器（LiteLLM，内置重试）"""
+    """流式调用 LLM，返回 token 迭代器（LiteLLM，内置重试）
+
+    当传入 tools 参数时，启用 function calling 模式。
+    返回的 chunk 中可能包含 tool_calls 信息。
+    """
     model_id = model or _get_model_identifier(task_type)
     key = api_key or _get_api_key()
     url = base_url if base_url is not None else _get_base_url()
@@ -99,12 +104,17 @@ async def chat_stream(
             }
             if url:
                 kwargs["base_url"] = url
+            if tools:
+                kwargs["tools"] = tools
 
             response = await litellm.acompletion(**kwargs)
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
                     yield delta.content
+                # 如果有 tool_calls，yield 完整 chunk 供调用方解析
+                if delta and hasattr(delta, "tool_calls") and delta.tool_calls:
+                    yield {"tool_calls": delta.tool_calls}
             return
         except Exception as e:
             if attempt < retries:
@@ -125,8 +135,13 @@ async def chat(
     api_key: str | None = None,
     base_url: str | None = None,
     model: str | None = None,
-) -> str:
-    """非流式调用 LLM，返回完整文本（LiteLLM，内置重试）"""
+    tools: list[dict] | None = None,
+) -> str | dict:
+    """非流式调用 LLM，返回完整文本或 tool_calls（LiteLLM，内置重试）
+
+    当传入 tools 参数时，启用 function calling 模式。
+    如果 LLM 返回 tool_calls，返回 dict {"content": ..., "tool_calls": [...]}
+    """
     model_id = model or _get_model_identifier(task_type)
     key = api_key or _get_api_key()
     url = base_url if base_url is not None else _get_base_url()
@@ -145,9 +160,29 @@ async def chat(
             }
             if url:
                 kwargs["base_url"] = url
+            if tools:
+                kwargs["tools"] = tools
 
             response = await litellm.acompletion(**kwargs)
-            return response.choices[0].message.content or ""
+            message = response.choices[0].message
+
+            # 检查是否有 tool_calls
+            if hasattr(message, "tool_calls") and message.tool_calls:
+                return {
+                    "content": message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            }
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+
+            return message.content or ""
         except Exception as e:
             if attempt < retries:
                 logger.warning("LLM chat failed (attempt %d/%d): %s", attempt + 1, retries + 1, e)
@@ -155,23 +190,3 @@ async def chat(
                 continue
             logger.error("LLM chat failed after %d retries: %s", retries + 1, e)
             raise
-
-
-async def embed(text: str) -> list[float]:
-    """文本向量化（LiteLLM）"""
-    model_id = _get_model_identifier("embedding")
-    key = _get_api_key(for_embedding=True)
-    url = _get_base_url(for_embedding=True)
-
-    kwargs: dict = {
-        "model": model_id,
-        "input": text,
-        "api_key": key,
-    }
-    if url:
-        kwargs["base_url"] = url
-
-    resp = await litellm.aembedding(**kwargs)
-    if not resp.data:
-        raise ValueError("Embedding API returned empty data")
-    return resp.data[0].embedding
