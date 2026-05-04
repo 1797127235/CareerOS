@@ -13,6 +13,7 @@
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import time
@@ -112,6 +113,7 @@ async def agent_loop(
                 task_type=task_type,
                 messages=messages,
                 tools=tools_schema if tools_schema else None,
+                max_tokens=4096,  # 增加 token 限制，避免长回复被截断
             ):
                 if isinstance(token, str):
                     # 普通文本 token
@@ -123,11 +125,13 @@ async def agent_loop(
                         # 找到或创建对应的 tool_call
                         tc_index = tc_delta.index if hasattr(tc_delta, "index") else 0
                         while len(tool_calls_buffer) <= tc_index:
-                            tool_calls_buffer.append({
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            })
+                            tool_calls_buffer.append(
+                                {
+                                    "id": "",
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            )
                         tc = tool_calls_buffer[tc_index]
                         if hasattr(tc_delta, "id") and tc_delta.id:
                             tc["id"] = tc_delta.id
@@ -138,25 +142,29 @@ async def agent_loop(
                                 tc["function"]["arguments"] += tc_delta.function.arguments
         except Exception as e:
             logger.error("LLM 调用失败 (step %d): %s", step_num, e)
-            steps.append(AgentStep(
-                step_number=step_num,
-                step_type="llm_call",
-                content="",
-                duration_ms=int((time.time() - step_start) * 1000),
-                success=False,
-                error=str(e),
-            ))
+            steps.append(
+                AgentStep(
+                    step_number=step_num,
+                    step_type="llm_call",
+                    content="",
+                    duration_ms=int((time.time() - step_start) * 1000),
+                    success=False,
+                    error=str(e),
+                )
+            )
             break
 
         # 2. 检查是否有 tool_calls
         if tool_calls_buffer and any(tc["id"] for tc in tool_calls_buffer):
             # LLM 返回了 tool_calls
-            steps.append(AgentStep(
-                step_number=step_num,
-                step_type="llm_call",
-                content=content_buffer or f"[决定调用 {len(tool_calls_buffer)} 个工具]",
-                duration_ms=int((time.time() - step_start) * 1000),
-            ))
+            steps.append(
+                AgentStep(
+                    step_number=step_num,
+                    step_type="llm_call",
+                    content=content_buffer or f"[决定调用 {len(tool_calls_buffer)} 个工具]",
+                    duration_ms=int((time.time() - step_start) * 1000),
+                )
+            )
 
             # 3. 执行工具调用
             tool_messages = []  # 收集所有 tool 消息
@@ -196,40 +204,47 @@ async def agent_loop(
                         tool_success = False
                         logger.error("工具执行失败: %s - %s", tool_name, e)
 
-                steps.append(AgentStep(
-                    step_number=step_num,
-                    step_type="tool_call",
-                    content=tool_result,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    duration_ms=int((time.time() - tool_start) * 1000),
-                    success=tool_success,
-                ))
+                steps.append(
+                    AgentStep(
+                        step_number=step_num,
+                        step_type="tool_call",
+                        content=tool_result,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        duration_ms=int((time.time() - tool_start) * 1000),
+                        success=tool_success,
+                    )
+                )
                 tool_calls_count += 1
 
                 # 收集 tool 消息（不立即 append）
-                tool_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": tool_result,
-                })
+                tool_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": tool_result,
+                    }
+                )
 
             # 4. 一条 assistant 消息包含所有 tool_calls + 多条 tool 消息
-            messages.append({
-                "role": "assistant",
-                "content": content_buffer,
-                "tool_calls": [
-                    {
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"],
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content_buffer,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                "arguments": tc["function"]["arguments"],
+                            },
                         }
-                    }
-                    for tc in tool_calls_buffer if tc["id"]
-                ],
-            })
+                        for tc in tool_calls_buffer
+                        if tc["id"]
+                    ],
+                }
+            )
             messages.extend(tool_messages)
 
             # 继续循环，让 LLM 处理工具结果
@@ -239,12 +254,14 @@ async def agent_loop(
             # LLM 返回了最终回复（已流式输出）
             final_response = content_buffer
 
-            steps.append(AgentStep(
-                step_number=step_num,
-                step_type="llm_call",
-                content=final_response,
-                duration_ms=int((time.time() - step_start) * 1000),
-            ))
+            steps.append(
+                AgentStep(
+                    step_number=step_num,
+                    step_type="llm_call",
+                    content=final_response,
+                    duration_ms=int((time.time() - step_start) * 1000),
+                )
+            )
 
             # yield 最终结果
             yield AgentResult(
