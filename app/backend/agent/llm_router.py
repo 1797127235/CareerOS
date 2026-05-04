@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 litellm.drop_params = True  # 丢弃不支持的参数，避免报错
 litellm.modify_params = True  # 自动修改参数
 
-# ── 任务类型 → 模型映射 ──
+# ── 任务类型 → 模型映射（不含 provider 前缀）──
 _ROUTE_MAP: dict[str, str] = {
     "general_chat": "qwen-plus",  # 日常对话、通用问答
     "career_planning": "qwen-plus",  # 职业规划、路径生成（需强推理）
@@ -40,10 +40,35 @@ TaskType = Literal[
 ]
 
 
-def _litellm_model(task_type: TaskType) -> str:
-    """任务类型 → LiteLLM 模型标识（带 provider 前缀）"""
-    model = _ROUTE_MAP.get(task_type, "qwen-plus")
-    return f"dashscope/{model}"
+def _get_model_identifier(task_type: TaskType) -> str:
+    """返回 LiteLLM 格式的 model identifier：provider/model"""
+    settings = get_settings()
+    if task_type == "embedding":
+        provider = settings.embedding_provider or settings.llm_provider or "dashscope"
+        model = settings.embedding_model or _ROUTE_MAP.get(task_type, "text-embedding-v4")
+    else:
+        provider = settings.llm_provider or "dashscope"
+        model = settings.llm_model or _ROUTE_MAP.get(task_type, "qwen-plus")
+
+    # OpenAI 不需要 provider 前缀
+    if provider == "openai":
+        return model
+    return f"{provider}/{model}"
+
+
+def _get_api_key(for_embedding: bool = False) -> str:
+    """获取 API Key"""
+    settings = get_settings()
+    if for_embedding:
+        return settings.embedding_api_key or settings.llm_api_key
+    return settings.llm_api_key
+
+
+def _get_base_url(for_embedding: bool = False) -> str | None:
+    """获取 base_url，空字符串返回 None（让 LiteLLM 用默认值）"""
+    settings = get_settings()
+    url = settings.embedding_base_url if for_embedding else settings.llm_base_url
+    return url or None
 
 
 async def chat_stream(
@@ -52,24 +77,32 @@ async def chat_stream(
     temperature: float = 0.7,
     max_tokens: int = 2048,
     retries: int = 2,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
 ):
     """流式调用 LLM，返回 token 迭代器（LiteLLM，内置重试）"""
-    settings = get_settings()
-    model = _litellm_model(task_type)
+    model_id = model or _get_model_identifier(task_type)
+    key = api_key or _get_api_key()
+    url = base_url if base_url is not None else _get_base_url()
     temp = 0.3 if task_type in ("skill_analysis", "memory_summarize") else temperature
 
     for attempt in range(retries + 1):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                temperature=temp,
-                max_tokens=max_tokens,
-                api_key=settings.dashscope_api_key,
-                base_url=settings.dashscope_base_url,
-                stream=True,
-                timeout=60,
-            )
+            kwargs: dict = {
+                "model": model_id,
+                "messages": messages,
+                "temperature": temp,
+                "max_tokens": max_tokens,
+                "api_key": key,
+                "stream": True,
+                "timeout": 60,
+            }
+            if url:
+                kwargs["base_url"] = url
+
+            response = await litellm.acompletion(**kwargs)
             async for chunk in response:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
@@ -90,24 +123,32 @@ async def chat(
     temperature: float = 0.7,
     max_tokens: int = 2048,
     retries: int = 2,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
 ) -> str:
     """非流式调用 LLM，返回完整文本（LiteLLM，内置重试）"""
-    settings = get_settings()
-    model = _litellm_model(task_type)
+    model_id = model or _get_model_identifier(task_type)
+    key = api_key or _get_api_key()
+    url = base_url if base_url is not None else _get_base_url()
     temp = 0.3 if task_type in ("skill_analysis", "memory_summarize") else temperature
 
     for attempt in range(retries + 1):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                temperature=temp,
-                max_tokens=max_tokens,
-                api_key=settings.dashscope_api_key,
-                base_url=settings.dashscope_base_url,
-                stream=False,
-                timeout=60,
-            )
+            kwargs: dict = {
+                "model": model_id,
+                "messages": messages,
+                "temperature": temp,
+                "max_tokens": max_tokens,
+                "api_key": key,
+                "stream": False,
+                "timeout": 60,
+            }
+            if url:
+                kwargs["base_url"] = url
+
+            response = await litellm.acompletion(**kwargs)
             return response.choices[0].message.content or ""
         except Exception as e:
             if attempt < retries:
@@ -120,14 +161,19 @@ async def chat(
 
 async def embed(text: str) -> list[float]:
     """文本向量化（LiteLLM）"""
-    settings = get_settings()
-    model = _litellm_model("embedding")
-    resp = await litellm.aembedding(
-        model=model,
-        input=text,
-        api_key=settings.dashscope_api_key,
-        base_url=settings.dashscope_base_url,
-    )
+    model_id = _get_model_identifier("embedding")
+    key = _get_api_key(for_embedding=True)
+    url = _get_base_url(for_embedding=True)
+
+    kwargs: dict = {
+        "model": model_id,
+        "input": text,
+        "api_key": key,
+    }
+    if url:
+        kwargs["base_url"] = url
+
+    resp = await litellm.aembedding(**kwargs)
     if not resp.data:
         raise ValueError("Embedding API returned empty data")
     return resp.data[0].embedding

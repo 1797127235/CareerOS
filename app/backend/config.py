@@ -33,11 +33,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── 核心鉴权 ──
-    dashscope_api_key: str = ""
+    # ── LLM Provider ──
+    llm_provider: str = "dashscope"
+    llm_model: str = "qwen-plus"
+    llm_api_key: str = ""
+    llm_base_url: str = ""  # 空 = 使用 LiteLLM 默认值
 
-    # ── 模型配置 ──
+    # ── Embedding Provider ──
+    embedding_provider: str = "dashscope"
     embedding_model: str = "text-embedding-v4"
+    embedding_api_key: str = ""  # 空 = 使用 llm_api_key
+    embedding_base_url: str = ""
+
+    # ── 旧字段（保留，不参与 fallback）──
+    dashscope_api_key: str = ""
 
     # ── 数据库 ──
     database_url: str = ""
@@ -100,9 +109,26 @@ def apply_user_config(settings: Settings, user_config: dict[str, Any] | None = N
     cfg = load_user_config() if user_config is None else user_config
     applied: dict[str, Any] = {}
 
-    for key in ("dashscope_api_key",):
-        if cfg.get(key) and getattr(settings, key, None) != cfg[key]:
+    # 新字段
+    _CONFIG_KEYS = (
+        "llm_provider",
+        "llm_model",
+        "llm_api_key",
+        "llm_base_url",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_api_key",
+        "embedding_base_url",
+        "dashscope_api_key",  # 保留旧字段
+    )
+
+    for key in _CONFIG_KEYS:
+        if cfg.get(key) is not None and getattr(settings, key, None) != cfg[key]:
             setattr(settings, key, cfg[key])
-            applied[key] = "***"
+            # key 字段脱敏
+            if "key" in key.lower():
+                applied[key] = "***"
+            else:
+                applied[key] = cfg[key]
 
     return applied

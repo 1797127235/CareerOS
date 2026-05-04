@@ -1,4 +1,4 @@
-"""RAG 记忆检索 — 基于 LlamaIndex + Chroma + DashScope
+"""RAG 记忆检索 — 基于 LlamaIndex + Chroma + LiteLLM
 
 用户的个人数据就是 RAG 的数据源：
 - UserProfile：画像、目标、技能
@@ -7,7 +7,7 @@
 - Conversation：对话历史摘要
 
 架构：
-- 向量化：DashScopeEmbedding (text-embedding-v4)
+- 向量化：LiteLLMEmbedding（通过 llm_router.embed()）
 - 向量库：ChromaVectorStore (PersistentClient)
 - 切割：SentenceSplitter
 - 索引：VectorStoreIndex
@@ -23,13 +23,13 @@ from typing import Any
 import chromadb
 from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings, VectorStoreIndex
+from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.embeddings.dashscope import DashScopeEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.config import USER_DATA_DIR, get_settings
+from app.backend.config import USER_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -45,16 +45,32 @@ _vector_store = None
 _settings_done = False
 
 
+class LiteLLMEmbedding(BaseEmbedding):
+    """LlamaIndex embedding 适配器，通过 llm_router.embed() 调用"""
+
+    async def _aget_query_embedding(self, query: str) -> list[float]:
+        from app.backend.agent.llm_router import embed
+
+        return await embed(query)
+
+    def _get_query_embedding(self, query: str) -> list[float]:
+        raise NotImplementedError("use async")
+
+    async def _aget_text_embedding(self, text: str) -> list[float]:
+        from app.backend.agent.llm_router import embed
+
+        return await embed(text)
+
+    def _get_text_embedding(self, text: str) -> list[float]:
+        raise NotImplementedError("use async")
+
+
 def _ensure_settings() -> None:
     """配置 LlamaIndex 全局设置（仅首次调用）"""
     global _settings_done
     if _settings_done:
         return
-    cfg = get_settings()
-    Settings.embed_model = DashScopeEmbedding(
-        model_name="text-embedding-v4",
-        api_key=cfg.dashscope_api_key,
-    )
+    Settings.embed_model = LiteLLMEmbedding()
     _settings_done = True
 
 
