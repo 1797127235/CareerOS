@@ -26,9 +26,10 @@ tiktoken>=0.7.0
 markitdown>=0.0.1
 litellm>=1.30.0
 
-# 记忆层：Mem0 + Chroma
-mem0ai>=0.1.0
-chromadb>=0.5.0
+# 记忆层：Cognee + Kuzu + LanceDB
+cognee>=0.1.0
+kuzu>=0.1.0
+lancedb>=0.1.0
 
 # Dev / CI
 ruff>=0.5.0

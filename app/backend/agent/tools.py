@@ -9,10 +9,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class ToolRegistry:
                     "name": tool.name,
                     "description": tool.description,
                     "parameters": tool.parameters,
-                }
+                },
             }
             for tool in self._tools.values()
         ]
@@ -63,12 +63,14 @@ class ToolRegistry:
             return f"错误：未知工具 '{name}'"
 
         try:
+            # 复制参数，避免修改原始 tool_args（会污染 AgentTrace 记录）
+            kwargs = dict(arguments)
             if tool.requires_db and db is not None:
-                arguments["db"] = db
+                kwargs["db"] = db
             if user_id is not None:
-                arguments["user_id"] = user_id
+                kwargs["user_id"] = user_id
 
-            result = await tool.handler(**arguments)
+            result = await tool.handler(**kwargs)
             return str(result)
         except Exception as e:
             logger.error("工具执行失败: %s - %s", name, e, exc_info=True)
@@ -84,6 +86,7 @@ async def _get_profile(user_id: str, db: Any = None) -> str:
         return "错误：数据库未初始化"
 
     from sqlalchemy import select
+
     from app.backend.models.user import User, UserProfile
 
     # 查询画像
@@ -107,8 +110,13 @@ async def _get_profile(user_id: str, db: Any = None) -> str:
         parts.append(f"专业：{profile.major}")
     if profile.grade:
         grade_map = {
-            "freshman": "大一", "sophomore": "大二", "junior": "大三",
-            "senior": "大四", "graduate1": "研一", "graduate2": "研二", "graduate3": "研三",
+            "freshman": "大一",
+            "sophomore": "大二",
+            "junior": "大三",
+            "senior": "大四",
+            "graduate1": "研一",
+            "graduate2": "研二",
+            "graduate3": "研三",
         }
         parts.append(f"年级：{grade_map.get(profile.grade, profile.grade)}")
     if profile.target_direction:
@@ -153,7 +161,8 @@ async def _update_profile(fields: dict[str, Any], user_id: str, db: Any = None) 
         return "错误：数据库未初始化"
 
     from sqlalchemy import select
-    from app.backend.models.user import User, UserProfile
+
+    from app.backend.models.user import UserProfile
     from app.backend.services.profile_service import _map_direction
 
     result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
@@ -213,7 +222,7 @@ async def _diagnose_jd(jd_text: str, user_id: str, db: Any = None) -> str:
 
         # 格式化输出
         parts = [
-            f"【JD 诊断结果】",
+            "【JD 诊断结果】",
             f"岗位：{result.jd_title}",
             f"匹配度：{result.overall_score}/100",
             f"总结：{result.summary}",
@@ -233,7 +242,7 @@ async def _diagnose_jd(jd_text: str, user_id: str, db: Any = None) -> str:
             parts.append(f"风险：{', '.join(result.risks)}")
 
         if result.action_plan:
-            parts.append(f"行动计划：")
+            parts.append("行动计划：")
             for i, plan in enumerate(result.action_plan, 1):
                 parts.append(f"  {i}. {plan}")
 
@@ -249,64 +258,70 @@ async def _diagnose_jd(jd_text: str, user_id: str, db: Any = None) -> str:
 
 # 注册工具
 
-tool_registry.register(Tool(
-    name="get_profile",
-    description="读取用户画像，包括学校、专业、技能、目标方向等信息。当需要了解用户背景时调用。",
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-    handler=_get_profile,
-    requires_db=True,
-))
+tool_registry.register(
+    Tool(
+        name="get_profile",
+        description="读取用户画像，包括学校、专业、技能、目标方向等信息。当需要了解用户背景时调用。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=_get_profile,
+        requires_db=True,
+    )
+)
 
-tool_registry.register(Tool(
-    name="update_profile",
-    description="从对话中增量更新用户画像。当用户提到目标方向、目标公司、个人偏好等信息时调用。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "fields": {
-                "type": "object",
-                "description": "要更新的字段",
-                "properties": {
-                    "target_direction": {
-                        "type": "string",
-                        "description": "目标方向：后端/前端/算法/AI/测试/运维/安全/客户端/数据/嵌入式/其他",
+tool_registry.register(
+    Tool(
+        name="update_profile",
+        description="从对话中增量更新用户画像。当用户提到目标方向、目标公司、个人偏好等信息时调用。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "object",
+                    "description": "要更新的字段",
+                    "properties": {
+                        "target_direction": {
+                            "type": "string",
+                            "description": "目标方向：后端/前端/算法/AI/测试/运维/安全/客户端/数据/嵌入式/其他",
+                        },
+                        "target_company_level": {
+                            "type": "string",
+                            "description": "目标公司：top(大厂)/major(中厂)/medium(小厂)/state_owned(国企)",
+                        },
+                        "bio": {"type": "string", "description": "个人简介"},
+                        "city": {"type": "string", "description": "意向城市"},
+                        "expected_salary": {"type": "string", "description": "期望薪资"},
+                        "english_level": {"type": "string", "description": "英语水平"},
                     },
-                    "target_company_level": {
-                        "type": "string",
-                        "description": "目标公司：top(大厂)/major(中厂)/medium(小厂)/state_owned(国企)",
-                    },
-                    "bio": {"type": "string", "description": "个人简介"},
-                    "city": {"type": "string", "description": "意向城市"},
-                    "expected_salary": {"type": "string", "description": "期望薪资"},
-                    "english_level": {"type": "string", "description": "英语水平"},
                 },
             },
+            "required": ["fields"],
         },
-        "required": ["fields"],
-    },
-    handler=_update_profile,
-    requires_db=True,
-))
+        handler=_update_profile,
+        requires_db=True,
+    )
+)
 
-tool_registry.register(Tool(
-    name="diagnose_jd",
-    description="诊断用户与 JD 的匹配度。当用户粘贴 JD 或询问岗位匹配情况时调用。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "jd_text": {
-                "type": "string",
-                "description": "JD 岗位描述文本",
+tool_registry.register(
+    Tool(
+        name="diagnose_jd",
+        description="诊断用户与 JD 的匹配度。当用户粘贴 JD 或询问岗位匹配情况时调用。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "jd_text": {
+                    "type": "string",
+                    "description": "JD 岗位描述文本",
+                },
             },
+            "required": ["jd_text"],
         },
-        "required": ["jd_text"],
-    },
-    handler=_diagnose_jd,
-    requires_db=True,
-))
+        handler=_diagnose_jd,
+        requires_db=True,
+    )
+)
 
 # web_search 工具暂不注册，等接入真实搜索 API 后再启用

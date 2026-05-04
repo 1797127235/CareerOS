@@ -1,20 +1,24 @@
 """对话服务 — SSE 流式对话 + 历史存 DB + 滚动摘要"""
+
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import cast
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.backend.agent.agent_loop import AgentResult, agent_loop
 from app.backend.agent.llm_router import TaskType
 from app.backend.agent.llm_router import chat as llm_chat
 from app.backend.agent.orchestrator import run_orchestrator
-from app.backend.agent.agent_loop import agent_loop, AgentResult
 from app.backend.agent.tools import tool_registry
-from app.backend.models.conversation import Conversation, Message
 from app.backend.models.agent_trace import AgentTrace
+from app.backend.models.conversation import Conversation, Message
 
 logger = logging.getLogger(__name__)
 
@@ -167,10 +171,8 @@ async def stream_chat(
         task = asyncio.create_task(_summarize_bg(conv.conversation_id))
         task.add_done_callback(_log_task_error)
 
-    # 4. Mem0 记忆提取：fire-and-forget（Story 1.2）
-    if full_content:
-        task = asyncio.create_task(_extract_memory_bg(user_id, user_input, full_content))
-        task.add_done_callback(_log_task_error)
+    # 4. Cognee 记忆提取已移除：事件驱动写入，不逐对话提取
+    # 成长事件通过 growth_events 表和 cognee_projector 投影到 Cognee
 
     yield _sse_done(conv.conversation_id)
 
@@ -208,27 +210,6 @@ async def _summarize_bg(conversation_id: str) -> None:
             await _summarize_and_persist(db, conv)
         except Exception:
             logger.exception("后台摘要失败: conversation_id=%s", conversation_id)
-
-
-async def _extract_memory_bg(user_id: str, user_message: str, assistant_reply: str) -> None:
-    """后台任务：从当轮对话提取记忆写入 Mem0（fire-and-forget）"""
-    from app.backend.agent.mem0_client import get_mem0
-
-    mem0 = get_mem0()
-    if mem0 is None:
-        return  # Mem0 未初始化，静默跳过
-
-    messages = [
-        {"role": "user", "content": user_message},
-        {"role": "assistant", "content": assistant_reply},
-    ]
-
-    try:
-        # mem0.add() 是同步调用，放线程池避免阻塞事件循环
-        await asyncio.to_thread(mem0.add, messages, user_id=user_id)
-        logger.debug("Mem0 记忆提取完成: user_id=%s", user_id)
-    except Exception:
-        logger.error("Mem0 记忆提取失败: user_id=%s", user_id, exc_info=True)
 
 
 async def _fetch_old_messages(db: AsyncSession, conv: Conversation) -> list[Message]:

@@ -1,4 +1,6 @@
-"""用户配置路由 — 读写 ~/.careeros/config.json"""
+"""User config routes backed by ~/.careeros/config.json."""
+
+from __future__ import annotations
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -7,8 +9,6 @@ from app.backend.config import apply_user_config, get_settings, load_user_config
 
 router = APIRouter(tags=["config"])
 
-
-# ── Provider 内置配置表 ──────────────────────────────
 
 _PROVIDER_DEFAULTS: dict[str, dict] = {
     "dashscope": {
@@ -54,25 +54,19 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
 }
 
 
-# ── Response/Update 模型 ──────────────────────────────
-
-
 class ConfigResponse(BaseModel):
-    # LLM
     llm_provider: str = "dashscope"
     llm_model: str = "qwen-plus"
-    llm_api_key: str = ""  # 返回时脱敏
+    llm_api_key: str = ""
     llm_base_url: str = ""
     has_llm_key: bool = False
 
-    # Embedding
     embedding_provider: str = "dashscope"
     embedding_model: str = "text-embedding-v4"
-    embedding_api_key: str = ""  # 返回时脱敏
+    embedding_api_key: str = ""
     embedding_base_url: str = ""
     has_embedding_key: bool = False
 
-    # 旧字段（向后兼容）
     dashscope_api_key: str = ""
     has_api_key: bool = False
 
@@ -102,16 +96,11 @@ class ConfigTestResponse(BaseModel):
     error: str = ""
 
 
-# ── 路由 ──────────────────────────────────────────────
-
-
 @router.get("/config", response_model=ConfigResponse)
 async def get_config() -> ConfigResponse:
-    """获取当前用户配置"""
     user_config = load_user_config()
     settings = get_settings()
 
-    # API Key 判断 — 不 fallback 到 dashscope_api_key
     has_llm_key = bool(user_config.get("llm_api_key") or settings.llm_api_key)
     has_embedding_key = bool(
         user_config.get("embedding_api_key")
@@ -121,8 +110,8 @@ async def get_config() -> ConfigResponse:
     )
     has_api_key = bool(user_config.get("dashscope_api_key") or settings.dashscope_api_key)
 
-    def mask_key(val: str) -> str:
-        return "***" if val else ""
+    def mask_key(value: str) -> str:
+        return "***" if value else ""
 
     return ConfigResponse(
         llm_provider=user_config.get("llm_provider") or settings.llm_provider,
@@ -142,12 +131,11 @@ async def get_config() -> ConfigResponse:
 
 @router.post("/config", response_model=ConfigResponse)
 async def update_config(body: ConfigUpdate) -> ConfigResponse:
-    """更新用户配置"""
-    data = {}
+    data: dict[str, str] = {}
     for field in body.model_fields:
-        val = getattr(body, field)
-        if val is not None:
-            data[field] = val
+        value = getattr(body, field)
+        if value is not None:
+            data[field] = value
 
     if data:
         merged = save_user_config(data)
@@ -158,14 +146,12 @@ async def update_config(body: ConfigUpdate) -> ConfigResponse:
 
 @router.post("/config/test", response_model=ConfigTestResponse)
 async def test_config(body: ConfigTestRequest) -> ConfigTestResponse:
-    """测试 LLM 连接"""
     import time
 
     from app.backend.agent.llm_router import chat
 
     start = time.time()
 
-    # 如果用户没有输入 API key，使用已保存的 key
     api_key = body.api_key
     if not api_key:
         user_config = load_user_config()
@@ -183,5 +169,8 @@ async def test_config(body: ConfigTestRequest) -> ConfigTestResponse:
             model=f"{body.provider}/{body.model}" if body.provider != "openai" else body.model,
         )
         return ConfigTestResponse(ok=True, latency_ms=int((time.time() - start) * 1000))
-    except Exception as e:
-        return ConfigTestResponse(ok=False, error=str(e)[:200])
+    except Exception as exc:
+        # 只返回错误类型，不暴露内部细节
+        error_type = type(exc).__name__
+        error_msg = str(exc)[:100] if len(str(exc)) <= 100 else f"{str(exc)[:100]}..."
+        return ConfigTestResponse(ok=False, error=f"{error_type}: {error_msg}")

@@ -1,22 +1,26 @@
-"""记忆管理路由 — Mem0 状态查询与重置"""
+"""记忆管理路由 — Cognee 状态查询与重置"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.backend.agent.mem0_client import get_mem0, get_mem0_status
+from app.backend.agent.cognee_client import get_cognee_status
+from app.backend.services import cognee_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
+# user_id 验证：只允许字母、数字、下划线、连字符，长度 1-64
+_USER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
 
 class MemoryStats(BaseModel):
-    status: str  # ready / no_api_key / error / not_initialized
+    status: str  # ready / not_installed / error / not_initialized
     count: int
 
 
@@ -31,19 +35,34 @@ class MemoryItem(BaseModel):
     categories: list[str] = []
 
 
+def _validate_user_id(user_id: str) -> str:
+    """验证 user_id 格式"""
+    if not _USER_ID_PATTERN.match(user_id):
+        raise HTTPException(status_code=400, detail="user_id 格式无效，只允许字母、数字、下划线、连字符，长度 1-64")
+    return user_id
+
+
 @router.get("/stats", response_model=MemoryStats)
 async def get_memory_stats(user_id: str = Query("demo_user")) -> MemoryStats:
     """查询当前记忆状态和条数"""
-    mem0 = get_mem0()
-    status = get_mem0_status()
+    _validate_user_id(user_id)
+    status = get_cognee_status()
 
-    if mem0 is None:
+    if status != "ready":
         return MemoryStats(status=status, count=0)
 
     try:
-        results = await asyncio.to_thread(mem0.get_all, user_id=user_id)
-        items = results.get("results", results) if isinstance(results, dict) else results
-        return MemoryStats(status=status, count=len(items))
+        # 从 SQLite 查询 growth_events 数量
+        from sqlalchemy import func, select
+
+        from app.backend.db.session import get_db
+        from app.backend.models.growth_event import GrowthEvent
+
+        # 使用 FastAPI DI 获取 session
+        async for db in get_db():
+            result = await db.execute(select(func.count(GrowthEvent.id)).where(GrowthEvent.user_id == user_id))
+            count = result.scalar() or 0
+            return MemoryStats(status=status, count=count)
     except Exception as e:
         logger.error("记忆条数查询失败: %s", e)
         return MemoryStats(status=status, count=0)
@@ -51,24 +70,35 @@ async def get_memory_stats(user_id: str = Query("demo_user")) -> MemoryStats:
 
 @router.post("/reset", response_model=MemoryResetResponse)
 async def reset_memory(user_id: str = Query("demo_user")) -> MemoryResetResponse:
-    """清空指定用户的所有 Mem0 记忆"""
-    mem0 = get_mem0()
-    if mem0 is None:
+    """清空指定用户的所有 Cognee 记忆"""
+    _validate_user_id(user_id)
+    status = get_cognee_status()
+    if status != "ready":
         raise HTTPException(status_code=503, detail="记忆服务未就绪")
 
     try:
-        # 先查条数（用于返回 deleted 数量）
-        results = await asyncio.to_thread(mem0.get_all, user_id=user_id)
-        items = results.get("results", results) if isinstance(results, dict) else results
-        count = len(items)
+        # 删除 SQLite 中的 growth_events
+        from sqlalchemy import delete, func, select
 
-        # 尝试 delete_all（新版 mem0ai），失败则逐条删除（兼容旧版）
+        from app.backend.db.session import get_db
+        from app.backend.models.growth_event import GrowthEvent
+
+        # 使用 FastAPI DI 获取 session，确保事务一致性
+        async for db in get_db():
+            # 先查条数
+            result = await db.execute(select(func.count(GrowthEvent.id)).where(GrowthEvent.user_id == user_id))
+            count = result.scalar() or 0
+
+            # 删除事件（在同一事务中）
+            await db.execute(delete(GrowthEvent).where(GrowthEvent.user_id == user_id))
+            # get_db 会自动 commit
+
+        # 清空 Cognee（在 SQLite 事务提交后）
+        # 如果 Cognee 失败，记录日志但不影响响应
         try:
-            await asyncio.to_thread(mem0.delete_all, user_id=user_id)
-        except AttributeError:
-            for item in items:
-                if item_id := item.get("id"):
-                    await asyncio.to_thread(mem0.delete, item_id)
+            await cognee_service.forget(user_id, "all")
+        except Exception as cognee_exc:
+            logger.warning("Cognee forget failed after SQLite reset: %s", cognee_exc)
 
         logger.info("记忆已重置: user_id=%s, deleted=%d", user_id, count)
         return MemoryResetResponse(deleted=count)
@@ -83,28 +113,37 @@ async def reset_memory(user_id: str = Query("demo_user")) -> MemoryResetResponse
 @router.get("/list", response_model=list[MemoryItem])
 async def list_memories(user_id: str = Query("demo_user")) -> list[MemoryItem]:
     """返回用户所有记忆条目，按 created_at 倒序"""
-    mem0 = get_mem0()
-    if mem0 is None:
+    _validate_user_id(user_id)
+    status = get_cognee_status()
+    if status != "ready":
         return []
 
     try:
-        results = await asyncio.to_thread(mem0.get_all, user_id=user_id)
-        items = results.get("results", results) if isinstance(results, dict) else results
+        from sqlalchemy import select
 
-        memories: list[MemoryItem] = []
-        for item in items:
-            memories.append(
-                MemoryItem(
-                    id=str(item.get("id", "")),
-                    memory=item.get("memory", ""),
-                    created_at=item.get("created_at"),
-                    categories=item.get("categories", []) or [],
-                )
+        from app.backend.db.session import get_db
+        from app.backend.models.growth_event import GrowthEvent
+
+        # 使用 FastAPI DI 获取 session
+        async for db in get_db():
+            result = await db.execute(
+                select(GrowthEvent).where(GrowthEvent.user_id == user_id).order_by(GrowthEvent.created_at.desc())
             )
+            events = result.scalars().all()
 
-        # 按 created_at 倒序（None 排最后）
-        memories.sort(key=lambda m: m.created_at or "", reverse=True)
-        return memories
+            memories: list[MemoryItem] = []
+            for event in events:
+                # 确保 id 是字符串
+                memories.append(
+                    MemoryItem(
+                        id=str(event.id),
+                        memory=event.payload_json or f"{event.event_type}: {event.entity_type or 'unknown'}",
+                        created_at=event.created_at.isoformat() if event.created_at else None,
+                        categories=[event.event_type] if event.event_type else [],
+                    )
+                )
+
+            return memories
     except Exception as e:
         logger.error("记忆列表查询失败: %s", e)
         return []

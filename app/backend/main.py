@@ -29,11 +29,11 @@ async def lifespan(app: FastAPI):
     applied = apply_user_config(settings)
     if applied:
         logger.info("config.json 覆盖: %s", list(applied.keys()))
-    # Mem0 记忆层初始化
-    from app.backend.agent.mem0_client import init_mem0
+    # Cognee 记忆层初始化（可选，失败不阻塞启动）
+    from app.backend.agent.cognee_client import init_cognee
 
-    mem0_status = init_mem0()
-    logger.info("Mem0 状态: %s", mem0_status)
+    cognee_status = init_cognee()
+    logger.info("Cognee 状态: %s", cognee_status)
     yield
     await engine.dispose()
 

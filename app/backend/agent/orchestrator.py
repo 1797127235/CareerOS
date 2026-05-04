@@ -11,7 +11,6 @@ Agent 编排引擎 — Skill 自发现 + 意图分类 + Prompt 组装
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -194,26 +193,17 @@ async def _classify_llm(user_input: str, skills: dict[str, SkillMeta]) -> str:
     return content.strip().lower().replace("-", "_")
 
 
-async def _retrieve_mem0(user_input: str, user_id: str) -> list[str]:
-    """语义检索 Mem0 中与 user_input 相关的历史记忆，失败返回空列表。"""
-    from app.backend.agent.mem0_client import get_mem0
-
-    mem0 = get_mem0()
-    if mem0 is None:
-        return []
+async def _retrieve_memories(user_input: str, user_id: str) -> list[str]:
+    """语义检索 Cognee 中与 user_input 相关的历史记忆，失败返回空列表。"""
+    from app.backend.services import cognee_service
 
     try:
-        # mem0.search() 是同步调用，放线程池
-        results = await asyncio.to_thread(mem0.search, user_input, user_id=user_id, limit=5)
-
-        # 兼容两种返回格式：dict{"results": [...]} 或直接 list
-        items = results.get("results", results) if isinstance(results, dict) else results
-
-        memories = [item["memory"].strip() for item in items if item.get("memory", "").strip()]
-        return memories
+        # 使用 Cognee recall 检索
+        results = await cognee_service.recall(user_id, user_input, limit=5)
+        return [r.strip() for r in results if r.strip()]
 
     except Exception:
-        logger.warning("Mem0 检索失败，回退至无记忆上下文: user_id=%s", user_id)
+        logger.warning("Cognee 检索失败，回退至无记忆上下文: user_id=%s", user_id)
         return []
 
 
@@ -320,7 +310,7 @@ async def run_orchestrator(
     intent, task_type = await classify(user_input)
 
     # 检索相关历史记忆
-    memories = await _retrieve_mem0(user_input, user_id)
+    memories = await _retrieve_memories(user_input, user_id)
 
     system = build_system_prompt(user_profile, intent, conversation_summary, memories=memories)
     return intent, task_type, system
