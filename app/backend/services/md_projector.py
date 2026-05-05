@@ -1,4 +1,4 @@
-"""Project committed growth events into markdown snapshots."""
+"""将已提交的成长事件投影为 Markdown 快照。"""
 
 from __future__ import annotations
 

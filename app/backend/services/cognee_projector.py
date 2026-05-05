@@ -1,4 +1,4 @@
-"""Projection helpers from growth events to Cognee."""
+"""将成长事件投影到 Cognee 的辅助方法。"""
 
 from __future__ import annotations
 

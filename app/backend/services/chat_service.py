@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _SUMMARY_WINDOW = 20
 
 # 按 conversation_id 隔离的轻量锁，防止并发触发摘要时数据竞争
-# MVP: 只增不减，生产环境需加 LRU 或 TTL 清理（<100 对话无影响）
+# 最小可用版本：只增不减，生产环境需加 LRU 或 TTL 清理（<100 对话无影响）
 _summary_locks: dict[str, asyncio.Lock] = {}
 
 _SUMMARIZE_PROMPT = """根据以下对话记录更新摘要。只保留：用户背景变化、重要结论和决策、未完成的待办。丢弃闲聊和中间推理。100 字以内，中文。无关紧要则输出"（无重要内容）"
@@ -133,7 +133,7 @@ async def stream_chat(
                     await db.rollback()
                     logger.warning("保存 AI 回复失败 (可能为部分): conversation_id=%s", conv.conversation_id)
 
-                # 对话后自动提取长期记忆（fire-and-forget）
+                # 对话后自动提取长期记忆（后台异步执行，不等待）
                 try:
                     from app.backend.services.memory_extractor import extract_and_save_memory
 
@@ -154,7 +154,7 @@ async def stream_chat(
         yield _sse_error("生成回复失败，请稍后重试")
         return
 
-    # 滚动摘要：fire-and-forget，不阻塞 SSE
+    # 滚动摘要：后台异步执行，不阻塞 SSE
     if conv.message_count >= 30 and conv.message_count % 10 == 0:
         task = asyncio.create_task(_summarize_bg(conv.conversation_id))
         task.add_done_callback(_log_task_error)

@@ -1,4 +1,4 @@
-"""GrowthEvent helpers for the SQLite truth source."""
+"""SQLite 事实源的 GrowthEvent 辅助方法。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Markdown memory helpers for projected profile snapshots."""
+"""用于画像投影快照的 Markdown 记忆读写辅助。"""
 
 from __future__ import annotations
 

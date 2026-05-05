@@ -1,4 +1,4 @@
-"""Resume ingestion and profile memory persistence."""
+"""简历导入与画像长期记忆持久化。"""
 
 from __future__ import annotations
 

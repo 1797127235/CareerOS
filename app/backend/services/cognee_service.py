@@ -1,4 +1,4 @@
-"""Cognee wrapper with SQLite fallback."""
+"""Cognee 封装：失败时回退到 SQLite。"""
 
 from __future__ import annotations
 

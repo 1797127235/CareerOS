@@ -1,4 +1,4 @@
-"""Extract long-term memory events from a chat turn."""
+"""从单轮对话中提取长期记忆事件。"""
 
 from __future__ import annotations
 
