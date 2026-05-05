@@ -101,7 +101,7 @@ async def stream_chat(
                 user_input,
                 deps=deps,
             ) as response:
-                async for text in response.stream_text():
+                async for text in response.stream_text(delta=True):
                     full_content += text
                     yield _sse_token(text, conv.conversation_id)
 
