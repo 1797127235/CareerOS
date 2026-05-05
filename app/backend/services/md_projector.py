@@ -1,5 +1,4 @@
 """MD Projector — 从 growth_events 投影到 .md 文件
-
 职责：
 - 从 growth_events 聚合生成 memory.md 和 entities/*.md
 - 定义事件→画像合并规则
