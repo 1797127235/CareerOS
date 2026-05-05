@@ -1,7 +1,6 @@
 from app.backend.models.agent_trace import AgentTrace
 from app.backend.models.conversation import Conversation, Message
 from app.backend.models.growth_event import GrowthEvent
-from app.backend.models.skill_record import SkillRecord
 from app.backend.models.user import User, UserProfile
 
 __all__ = [
@@ -9,7 +8,6 @@ __all__ = [
     "Conversation",
     "GrowthEvent",
     "Message",
-    "SkillRecord",
     "User",
     "UserProfile",
 ]

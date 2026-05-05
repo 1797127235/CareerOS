@@ -127,6 +127,22 @@ async def stream_chat(
                 except Exception:
                     await db.rollback()
                     logger.warning("保存 AI 回复失败 (可能为部分): conversation_id=%s", conv.conversation_id)
+
+                # 对话后自动提取长期记忆（fire-and-forget）
+                try:
+                    from app.backend.services.memory_extractor import extract_and_save_memory
+
+                    task = asyncio.create_task(
+                        extract_and_save_memory(
+                            user_id=user_id,
+                            conversation_id=conv.conversation_id,
+                            user_input=user_input,
+                            assistant_reply=full_content,
+                        )
+                    )
+                    task.add_done_callback(_log_task_error)
+                except Exception as e:
+                    logger.warning("对话记忆提取任务创建失败: %s", e)
     except Exception:
         logger.exception("生成 AI 回复失败: conversation_id=%s", conv.conversation_id)
         await db.rollback()
