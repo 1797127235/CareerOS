@@ -2,7 +2,7 @@
 
 ## What This Is
 
-CareerOS — 面向中国 CS 学生的自托管 AI 职业规划助手。FastAPI + SQLAlchemy + Mem0 + DashScope (qwen-plus/qwen-max) + LiteLLM + SQLite。前端 React 19 + Vite + Tailwind CSS 4。
+CareerOS — 面向中国 CS 学生的自托管 AI 职业规划助手。FastAPI + SQLAlchemy + DashScope (qwen-plus/qwen-max) + LiteLLM + SQLite。前端 React 19 + Vite + Tailwind CSS 4。
 
 ## How to Run
 
@@ -19,7 +19,7 @@ cd app/frontend && npm install && cd ../..
 # 打开 http://localhost:5173
 ```
 
-启动后自动建表（SQLite），无需手动迁移。首次启动自动初始化 Mem0 记忆层。
+启动后自动建表（SQLite），无需手动迁移。首次启动自动初始化记忆目录（`~/.careeros/memory/`）。
 
 ## Project Structure
 
@@ -34,30 +34,25 @@ career-os/
 │   ├── models/
 │   │   ├── user.py           # User + UserProfile（含 profile_data JSON）
 │   │   ├── conversation.py   # Conversation + Message
-│   │   ├── jd_diagnosis.py   # JDDiagnosis
 │   │   ├── skill_record.py   # SkillRecord 技能成长记录
 │   │   └── agent_trace.py    # AgentTrace 可观测性
 │   ├── agent/
 │   │   ├── pydantic_agent.py  # PydanticAI Agent 定义 + 动态系统提示词
 │   │   ├── pydantic_tools.py  # Agent 工具（get_profile, update_profile）
 │   │   ├── llm_router.py     # LLM 路由（多 Provider），流式+非流式
-│   │   ├── mem0_client.py    # Mem0 记忆层封装
 │   │   └── deps.py           # Agent 依赖注入（CareerOSDeps）
 │   ├── routers/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── chat.py           # POST /api/chat (SSE), GET /api/chat/history, DELETE /api/chat/{id}
 │   │   ├── profile.py        # POST /api/profile/resume, GET/PATCH/DELETE /api/profile/me
-│   │   ├── jd.py             # POST /api/jd/diagnose
 │   │   ├── memory.py         # GET /api/memory/stats, /api/memory/list, POST /api/memory/reset
 │   │   ├── skills.py         # GET/POST/PATCH/DELETE /api/skills
 │   │   └── config_router.py  # GET/POST /api/config
 │   ├── schemas/
-│   │   ├── profile.py        # ProfileResponse, ProfileUpdate, SkillItem（含 context）
-│   │   └── jd.py             # JDDiagnoseRequest, JDDiagnoseResponse, GapSkill
+│   │   └── profile.py        # ProfileResponse, ProfileUpdate, SkillItem（含 context）
 │   └── services/
 │       ├── chat_service.py   # 对话业务：Agent Loop 集成 + SSE 流式输出
 │       ├── profile_service.py # 简历提取 + LLM 解析 + DB 写入
-│       ├── jd_service.py     # JD 诊断：画像 + JD → LLM → 匹配评分 + 缺口 + 建议
 │       └── skill_service.py  # 技能记录 CRUD
 ├── app/frontend/
 │   └── src/
@@ -95,7 +90,6 @@ career-os/
 | `GET`  | `/api/profile/me?user_id=` | 获取当前用户画像 |
 | `PATCH` | `/api/profile/me?user_id=` | 局部更新用户画像（null 可清空字段） |
 | `DELETE` | `/api/profile/me?user_id=` | 重置用户画像（保留 nickname） |
-| `POST` | `/api/jd/diagnose?user_id=` | JD 诊断：LLM 对比画像输出匹配评分+缺口+建议 |
 | `GET`  | `/api/memory/stats?user_id=` | 记忆统计（状态、数量） |
 | `GET`  | `/api/memory/list?user_id=` | 记忆列表 |
 | `POST` | `/api/memory/reset?user_id=` | 重置记忆 |
@@ -109,9 +103,9 @@ career-os/
 ## Key Architecture Decisions
 
 - **Agent 系统**：PydanticAI 实现（`pydantic_agent.py`），支持工具调用、动态系统提示词、流式输出
-- **工具注册**：`@agent.tool` 装饰器注册工具，2 个内置工具：`get_profile`、`update_profile`（JD 结构化诊断走 `POST /api/jd/diagnose`，非 Agent 工具）
+- **工具注册**：`@agent.tool` 装饰器注册工具，3 个核心工具：`memory_search`、`memory_update`、`memory_add`
 - **LLM 路由**：`llm_router.py` 支持多 Provider（DashScope/OpenAI/DeepSeek 等），通过 LiteLLM 统一调用
-- **记忆层**：Mem0 + Chroma，自动从对话中提取关键信息，语义检索注入上下文
+- **记忆层**：.md 文件记忆系统（`memory_service.py`），`memory.md` 存核心画像，`entities/*.md` 存技能/经历/偏好等
 - **数据库**：SQLite（`career_os.db`），`lifespan` 中 `Base.metadata.create_all` 自动建表
 - **画像数据模型**：扩展字段存入 `profile_data` JSON 列，零 ORM 列新增
 - **聊天状态**：`chatSession.tsx` 全局 Context Provider，跨页面保持对话状态

@@ -380,9 +380,8 @@ xl:    26px   /* 区块标题 */
 4. 三页 + 顶部导航的静态版本(数据 mock)
 5. 接 `/api/health` 跑通跨域+代理
 6. 接 `/api/profile/me` `/api/profile/resume` `PATCH /api/profile/me`
-7. 接 `/api/jd/diagnose`
-8. SSE 客户端(原生 fetch + ReadableStream + TextDecoder,不引第三方 EventSource 库 — 后端是 POST,主流库不支持) → 接 `/api/chat`
-9. localStorage UUID 作为 user_id,首次访问自动生成
+7. SSE 客户端(原生 fetch + ReadableStream + TextDecoder,不引第三方 EventSource 库 — 后端是 POST,主流库不支持) → 接 `/api/chat`
+8. localStorage UUID 作为 user_id,首次访问自动生成
 
 ※ shadcn/ui 我们只用结构组件(Button/Input/Textarea/Dialog/Tooltip),全部默认色板被我们的 OKLCH tokens 覆盖。不用它的 chart / sparkline / 任何图表组件。
 

@@ -41,32 +41,6 @@ export type ResumeUploadResponse = {
   raw_text_preview: string;
 };
 
-export type GapSkill = {
-  skill: string;
-  priority: string;
-};
-
-export type JDDiagnoseResponse = {
-  diagnosis_id?: string | null;
-  jd_text?: string | null;
-  jd_title: string;
-  overall_score: number;
-  summary: string;
-  skill_gaps: GapSkill[];
-  matched_skills: string[];
-  strengths: string[];
-  risks: string[];
-  resume_tips: string[];
-  action_plan: string[];
-};
-
-export type JDHistoryItem = {
-  diagnosis_id: string;
-  jd_title: string;
-  overall_score: number;
-  created_at: string;
-};
-
 export type TargetStatus =
   | "interested"
   | "applied"
@@ -93,7 +67,6 @@ export type TargetDetail = TargetCard & {
   jd_url?: string | null;
   salary?: string | null;
   notes?: string | null;
-  diagnosis?: JDDiagnoseResponse | null;
 };
 
 export type TargetCreatePayload = {
@@ -103,7 +76,6 @@ export type TargetCreatePayload = {
   salary?: string | null;
   jd_text?: string | null;
   jd_url?: string | null;
-  diagnosis_id?: string | null;
   notes?: string | null;
 };
 
@@ -199,36 +171,6 @@ export function uploadResume(file: File): Promise<ResumeUploadResponse> {
   return http<ResumeUploadResponse>(
     `/api/profile/resume?user_id=${encodeURIComponent(getUserId())}`,
     { method: "POST", body: form },
-  );
-}
-
-export function diagnoseJD(jd_text: string): Promise<JDDiagnoseResponse> {
-  return http<JDDiagnoseResponse>(
-    `/api/jd/diagnose?user_id=${encodeURIComponent(getUserId())}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jd_text }),
-    },
-  );
-}
-
-export function getJDDiagnosis(diagnosisId: string): Promise<JDDiagnoseResponse> {
-  return http<JDDiagnoseResponse>(
-    `/api/jd/${encodeURIComponent(diagnosisId)}?user_id=${encodeURIComponent(getUserId())}`,
-  );
-}
-
-export function getJDHistory(): Promise<{ items: JDHistoryItem[] }> {
-  return http<{ items: JDHistoryItem[] }>(
-    `/api/jd/history?user_id=${encodeURIComponent(getUserId())}`,
-  );
-}
-
-export function deleteJDDiagnosis(diagnosisId: string): Promise<{ deleted: boolean }> {
-  return http<{ deleted: boolean }>(
-    `/api/jd/${encodeURIComponent(diagnosisId)}?user_id=${encodeURIComponent(getUserId())}`,
-    { method: "DELETE" },
   );
 }
 

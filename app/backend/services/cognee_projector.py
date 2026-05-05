@@ -140,12 +140,6 @@ def _build_memory_content(event: GrowthEvent) -> str:
         new_level = payload.get("new_level", "未知")
         return f"用户 {skill} 水平从 {old_level} 提升到 {new_level}"
 
-    elif event.event_type == "jd_diagnosed":
-        company = payload.get("company", "未知公司")
-        position = payload.get("position", "未知岗位")
-        score = payload.get("match_score", "未知")
-        return f"用户诊断了 {company} {position} 岗位，匹配度 {score}"
-
     elif event.event_type == "target_created":
         company = payload.get("company", "未知公司")
         position = payload.get("position", "未知岗位")

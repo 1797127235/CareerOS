@@ -141,27 +141,6 @@ async def stream_chat(
     yield _sse_done(conv.conversation_id)
 
 
-async def _load_user_profile(db: AsyncSession, user_id: str) -> dict | None:
-    """从 DB 加载用户画像（含 nickname）"""
-    from app.backend.models.user import User, UserProfile
-
-    user_result = await db.execute(select(User).where(User.user_id == user_id))
-    user = user_result.scalar_one_or_none()
-
-    result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-    profile = result.scalar_one_or_none()
-    if profile is None:
-        return None
-    return {
-        "nickname": user.nickname if user else None,
-        "grade": profile.grade,
-        "school_name": profile.school_name,
-        "major": profile.major,
-        "target_direction": profile.target_direction,
-        "current_skills": profile.current_skills,
-    }
-
-
 async def _summarize_bg(conversation_id: str) -> None:
     """后台摘要：独立 db session，内部重判触发条件防并发重复触发。"""
     from app.backend.db.base import get_async_session_maker

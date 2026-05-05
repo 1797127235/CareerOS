@@ -1,9 +1,11 @@
 """PydanticAI Agent 工具 — 使用 @agent.tool 装饰器
 
 工具列表：
-- get_profile: 读取用户画像
-- update_profile: 从对话中增量更新画像
-- diagnose_jd: JD 对比分析
+- get_profile: 读取用户画像（已废弃，改用 memory_search）
+- update_profile: 从对话中增量更新画像（已废弃，改用 memory_update）
+- memory_search: 搜索记忆内容
+- memory_update: 更新记忆内容
+- memory_add: 添加记忆内容
 """
 
 from __future__ import annotations
@@ -25,71 +27,118 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         agent: PydanticAI Agent 实例
     """
 
+    # ── 记忆工具（新版）──────────────────────────────
+
+    @agent.tool
+    async def memory_search(
+        ctx: RunContext[CareerOSDeps],
+        query: str,
+        entity_types: list[str] | None = None,
+    ) -> str:
+        """搜索记忆内容。当需要查找用户信息时调用。
+
+        Args:
+            query: 搜索关键词
+            entity_types: 限定搜索的实体类型列表，如 ["skills", "experiences"]
+                可选值：skills, experiences, preferences, goals, decisions, relationships, status
+                如果不指定，搜索所有类型
+        """
+        logger.info("工具调用: memory_search, query=%s, entity_types=%s", query, entity_types)
+        from app.backend.services.memory_service import read_entity, search_memory
+
+        # 如果指定了实体类型，只搜索这些类型
+        if entity_types:
+            results = []
+            for entity_type in entity_types:
+                content = read_entity(entity_type)
+                if content and query.lower() in content.lower():
+                    results.append(
+                        {
+                            "file": f"entities/{entity_type}.md",
+                            "section": entity_type,
+                            "content": content[:500],  # 限制长度
+                        }
+                    )
+            return str(results) if results else f"在 {entity_types} 中未找到相关内容。"
+
+        # 否则搜索所有记忆
+        results = search_memory(query)
+        return str(results) if results else "未找到相关内容。"
+
+    @agent.tool
+    async def memory_update(
+        ctx: RunContext[CareerOSDeps],
+        entity_type: str,
+        section: str,
+        content: str,
+    ) -> str:
+        """更新记忆内容。当用户提到新信息时调用。
+
+        Args:
+            entity_type: 实体类型
+                - memory: 核心记忆（学校、专业、年级、目标等）
+                - skills: 技能
+                - experiences: 经历
+                - preferences: 偏好
+                - goals: 目标
+                - decisions: 决策
+                - relationships: 关系
+                - status: 当前状态
+            section: 章节标题，如 "基础信息"、"编程语言"、"项目经历"
+            content: 要更新的内容
+        """
+        logger.info("工具调用: memory_update, entity_type=%s, section=%s", entity_type, section)
+        from app.backend.services.memory_service import update_memory_section, write_entity
+
+        if entity_type == "memory":
+            update_memory_section(section, content)
+            return f"核心记忆已更新：{section}"
+        else:
+            # 对于实体记忆，直接写入整个文件（简化实现）
+            write_entity(entity_type, content)
+            return f"实体记忆已更新：{entity_type}"
+
+    @agent.tool
+    async def memory_add(
+        ctx: RunContext[CareerOSDeps],
+        entity_type: str,
+        section: str,
+        content: str,
+    ) -> str:
+        """添加记忆内容。当用户提到新信息时调用。
+
+        Args:
+            entity_type: 实体类型
+                - skills: 技能
+                - experiences: 经历
+                - preferences: 偏好
+                - goals: 目标
+                - decisions: 决策
+                - relationships: 关系
+                - status: 当前状态
+            section: 章节标题，如 "编程语言"、"项目经历"
+            content: 要添加的内容
+        """
+        logger.info("工具调用: memory_add, entity_type=%s, section=%s", entity_type, section)
+        from app.backend.services.memory_service import append_to_entity
+
+        append_to_entity(entity_type, section, content)
+        return f"已添加到 {entity_type} 的 {section} 部分"
+
+    # ── 旧版工具（已废弃，保留兼容性）─────────────────
+
     @agent.tool
     async def get_profile(ctx: RunContext[CareerOSDeps]) -> str:
         """读取用户画像。仅当用户明确要求「查看我的画像」「我的信息」时调用，不要主动调用。"""
-        logger.info("工具调用: get_profile, user_id=%s", ctx.deps.user_id)
-        from sqlalchemy import select
+        logger.info("工具调用: get_profile（已废弃，建议使用 memory_search）, user_id=%s", ctx.deps.user_id)
+        from app.backend.services.memory_service import read_memory
 
-        from app.backend.models.user import User, UserProfile
+        # 读取核心记忆
+        memory_content = read_memory()
+        if memory_content:
+            return memory_content
 
-        db = ctx.deps.db
-        user_id = ctx.deps.user_id
-
-        # 查询画像
-        result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-        profile = result.scalar_one_or_none()
-
-        if not profile:
-            return "用户画像为空，请先上传简历或手动填写画像。"
-
-        # 查询昵称
-        user = await db.get(User, user_id)
-        nickname = user.nickname if user else None
-
-        # 组装画像摘要
-        parts = []
-        if nickname:
-            parts.append(f"姓名：{nickname}")
-        if profile.school_name:
-            parts.append(f"学校：{profile.school_name}（{profile.school_level or '未知'}）")
-        if profile.major:
-            parts.append(f"专业：{profile.major}")
-        if profile.grade:
-            grade_map = {
-                "freshman": "大一",
-                "sophomore": "大二",
-                "junior": "大三",
-                "senior": "大四",
-                "graduate1": "研一",
-                "graduate2": "研二",
-                "graduate3": "研三",
-            }
-            parts.append(f"年级：{grade_map.get(profile.grade, profile.grade)}")
-        if profile.target_direction:
-            parts.append(f"目标方向：{profile.target_direction}")
-        if profile.target_company_level:
-            level_map = {"top": "大厂", "major": "中厂", "medium": "小厂", "state_owned": "国企"}
-            parts.append(f"目标公司：{level_map.get(profile.target_company_level, profile.target_company_level)}")
-
-        skills = profile.current_skills
-        if skills and isinstance(skills, list):
-            skill_names = [s.get("skill", s.get("name", "")) for s in skills if isinstance(s, dict)]
-            if skill_names:
-                parts.append(f"技能：{', '.join(skill_names)}")
-
-        # 扩展字段
-        pdata = profile.profile_data or {}
-        if pdata.get("bio"):
-            parts.append(f"简介：{pdata['bio']}")
-        if pdata.get("education"):
-            edu = pdata["education"]
-            if edu.get("gpa"):
-                parts.append(f"GPA：{edu['gpa']}")
-            if edu.get("awards"):
-                parts.append(f"获奖：{', '.join(edu['awards'])}")
-
-        return "\n".join(parts) if parts else "画像数据不完整，请补充信息。"
+        return "用户画像为空，请先上传简历或手动填写画像。"
 
     @agent.tool
     async def update_profile(
@@ -114,102 +163,55 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
                 - expected_salary: 期望薪资
                 - english_level: 英语水平
         """
-        logger.info("工具调用: update_profile, user_id=%s, fields=%s", ctx.deps.user_id, fields)
-        from sqlalchemy import select
+        logger.info(
+            "工具调用: update_profile（已废弃，建议使用 memory_update）, user_id=%s, fields=%s",
+            ctx.deps.user_id,
+            fields,
+        )
+        from app.backend.services.memory_service import update_memory_section
 
-        from app.backend.models.user import UserProfile
-        from app.backend.services.profile_service import _map_direction
-
-        db = ctx.deps.db
-        user_id = ctx.deps.user_id
-
-        # 定义允许的字段
-        allowed_fields = {
-            "school_name",
-            "major",
-            "grade",  # 基础信息
-            "target_direction",
-            "target_company_level",  # 目标
-            "bio",
-            "city",
-            "expected_salary",
-            "english_level",  # 扩展信息
-        }
-
-        # 过滤掉未知字段
-        unknown_fields = set(fields.keys()) - allowed_fields
-        if unknown_fields:
-            logger.warning("忽略未知字段: %s", unknown_fields)
-            fields = {k: v for k, v in fields.items() if k in allowed_fields}
-
-        result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-        profile = result.scalar_one_or_none()
-
-        if not profile:
-            profile = UserProfile(user_id=user_id)
-            db.add(profile)
-            await db.flush()
-
-        pdata = dict(profile.profile_data or {})
-        updated_fields = []
-
-        # 直接映射的字段（存到 profile 表）
-        direct_fields = {"school_name", "major"}
-        for key in direct_fields:
-            if key in fields and fields[key] is not None:
-                setattr(profile, key, fields[key])
-                updated_fields.append(key)
-
-        # grade 字段需要校验合法值
-        valid_grades = {"freshman", "sophomore", "junior", "senior", "graduate1", "graduate2", "graduate3"}
-        if "grade" in fields and fields["grade"] is not None:
-            grade_val = fields["grade"].lower() if isinstance(fields["grade"], str) else fields["grade"]
-            # 支持中文年级映射
+        # 将字段转换为核心记忆格式
+        parts = []
+        if "school_name" in fields:
+            parts.append(f"- 学校：{fields['school_name']}")
+        if "major" in fields:
+            parts.append(f"- 专业：{fields['major']}")
+        if "grade" in fields:
             grade_map = {
-                "大一": "freshman",
-                "大二": "sophomore",
-                "大三": "junior",
-                "大四": "senior",
-                "研一": "graduate1",
-                "研二": "graduate2",
-                "研三": "graduate3",
+                "freshman": "大一",
+                "sophomore": "大二",
+                "junior": "大三",
+                "senior": "大四",
+                "graduate1": "研一",
+                "graduate2": "研二",
+                "graduate3": "研三",
+                "大一": "大一",
+                "大二": "大二",
+                "大三": "大三",
+                "大四": "大四",
+                "研一": "研一",
+                "研二": "研二",
+                "研三": "研三",
             }
-            grade_val = grade_map.get(grade_val, grade_val)
-            if grade_val in valid_grades:
-                profile.grade = grade_val
-                updated_fields.append("grade")
-            else:
-                logger.warning("无效的 grade: %s", fields["grade"])
+            parts.append(f"- 年级：{grade_map.get(fields['grade'], fields['grade'])}")
+        if "target_direction" in fields:
+            parts.append(f"- 目标岗位：{fields['target_direction']}")
+        if "target_company_level" in fields:
+            level_map = {"top": "大厂", "major": "中厂", "medium": "小厂", "state_owned": "国企"}
+            parts.append(
+                f"- 目标公司类型：{level_map.get(fields['target_company_level'], fields['target_company_level'])}"
+            )
+        if "bio" in fields:
+            parts.append(f"- 个人简介：{fields['bio']}")
+        if "city" in fields:
+            parts.append(f"- 意向城市：{fields['city']}")
+        if "expected_salary" in fields:
+            parts.append(f"- 期望薪资：{fields['expected_salary']}")
+        if "english_level" in fields:
+            parts.append(f"- 英语水平：{fields['english_level']}")
 
-        # target_direction 需要校验合法值
-        if "target_direction" in fields and fields["target_direction"] is not None:
-            mapped = _map_direction(fields["target_direction"])
-            if mapped:
-                profile.target_direction = mapped
-                updated_fields.append("target_direction")
-            else:
-                logger.warning("无效的 target_direction: %s", fields["target_direction"])
-
-        # target_company_level 需要校验合法值
-        valid_company_levels = {"top", "major", "medium", "state_owned"}
-        if "target_company_level" in fields and fields["target_company_level"] is not None:
-            if fields["target_company_level"] in valid_company_levels:
-                profile.target_company_level = fields["target_company_level"]
-                updated_fields.append("target_company_level")
-            else:
-                logger.warning("无效的 target_company_level: %s", fields["target_company_level"])
-
-        # 扩展字段存入 profile_data
-        ext_fields = {"bio", "city", "expected_salary", "english_level"}
-        for key in ext_fields:
-            if key in fields and fields[key] is not None:
-                pdata[key] = fields[key]
-                updated_fields.append(key)
-
-        profile.profile_data = pdata
-        await db.flush()
-
-        if updated_fields:
-            return f"画像已更新：{', '.join(updated_fields)}"
+        if parts:
+            update_memory_section("基础信息", "\n".join(parts))
+            return f"画像已更新：{', '.join(fields.keys())}"
         else:
             return "没有需要更新的字段。"

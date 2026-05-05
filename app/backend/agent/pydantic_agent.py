@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.backend.agent.deps import CareerOSDeps
 from app.backend.config import get_settings
-
-if TYPE_CHECKING:
-    from pydantic_ai import Agent
-    from pydantic_ai.models.openai import OpenAIChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -80,14 +78,14 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             "你的目标是帮助学生从大一到毕业，追踪成长轨迹，提供个性化的职业规划建议。"
             "\n\n"
             "## 核心能力\n"
-            "1. 诊断 JD 匹配度，找出技能缺口\n"
+            "1. 结合用户画像，对用户提供的岗位描述（JD）与求职方向做分析与建议（无独立结构化诊断 API）\n"
             "2. 提供学习路径和职业发展建议\n"
             "3. 追踪成长里程碑\n"
             "\n\n"
             "## 用户画像规则\n"
             "用户画像（学校、专业、年级、技能、目标）已自动加载到上下文中的「用户信息」部分。\n"
             "- 【不要】主动调用 get_profile 工具，画像已在上下文中\n"
-            "- 当用户提到个人信息（学校、专业、年级、目标方向等）时，【必须】调用 update_profile 工具保存\n"
+            "- 当用户提到个人信息（学校、专业、年级、目标方向等）时，【必须】调用 memory_update 工具保存\n"
             "- 保存后告诉用户「已记录你的信息」，不要说「已同步」而不实际调用工具\n"
             "\n\n"
             "## 回复风格\n"
@@ -95,7 +93,13 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             "- 结构化输出（使用 Markdown）\n"
             "- 给出具体可执行的建议\n"
             "- 鼓励而非说教\n"
-            "- 不要重复询问用户已经说过的信息"
+            "- 不要重复询问用户已经说过的信息\n"
+            "\n\n"
+            "## 自我介绍规范\n"
+            "- 你是一个通用的职业规划助手，不要说「专为XX定制」或「专为XX设计」\n"
+            "- 首次对话时，简短欢迎即可（1-2句），不要长篇大论\n"
+            "- 不要把用户的画像信息全部复述一遍，用户自己知道自己的信息\n"
+            "- 直接询问用户需要什么帮助，而不是列出一堆「你需要补充的信息」"
         ),
         retries=2,
     )
@@ -110,49 +114,17 @@ def create_agent() -> Agent[CareerOSDeps, str]:
         from sqlalchemy import select
 
         from app.backend.models.conversation import Message
-        from app.backend.models.user import User, UserProfile
-        from app.backend.services import cognee_service
+        from app.backend.services.memory_service import read_memory
 
         db = ctx.deps.db
-        user_id = ctx.deps.user_id
 
         parts = []
 
-        # 加载用户画像
-        result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-        profile = result.scalar_one_or_none()
-
-        if profile:
-            user = await db.get(User, user_id)
-            nickname = user.nickname if user else None
-
-            if nickname:
-                parts.append(f"用户昵称：{nickname}")
-            if profile.school_name:
-                parts.append(f"学校：{profile.school_name}")
-            if profile.major:
-                parts.append(f"专业：{profile.major}")
-            if profile.grade:
-                grade_map = {
-                    "freshman": "大一",
-                    "sophomore": "大二",
-                    "junior": "大三",
-                    "senior": "大四",
-                    "graduate1": "研一",
-                    "graduate2": "研二",
-                    "graduate3": "研三",
-                }
-                parts.append(f"年级：{grade_map.get(profile.grade, profile.grade)}")
-            if profile.target_direction:
-                parts.append(f"目标方向：{profile.target_direction}")
-
-        # 加载相关记忆
+        # 加载核心记忆（L2 实体记忆）
         try:
-            memories = await cognee_service.recall(user_id, "职业规划技能成长", limit=3)
-            if memories:
-                parts.append("相关记忆：")
-                for mem in memories:
-                    parts.append(f"- {mem}")
+            memory_content = read_memory()
+            if memory_content:
+                parts.append(memory_content)
         except Exception:
             pass  # 记忆加载失败不影响对话
 
@@ -170,6 +142,10 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             if history_messages:
                 # 反转为正序（最早的在前）
                 history_messages = list(reversed(history_messages))
+
+                # 去掉最后一条 user 消息（避免与当前 user_input 重复）
+                if history_messages and history_messages[-1].role == "user":
+                    history_messages = history_messages[:-1]
 
                 # 格式化为文本
                 history_lines = []
@@ -189,12 +165,8 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             pass  # 历史消息加载失败不影响对话
 
         if parts:
-            return (
-                "【用户画像 - 已自动加载，不要调用 get_profile】\n"
-                + "\n".join(parts)
-                + "\n\n注意：以上信息已加载，直接使用。当用户提到新信息时，调用 update_profile 保存。"
-            )
-        return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 update_profile 保存。"
+            return "\n\n".join(parts)
+        return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 memory_update 保存。"
 
     logger.info("PydanticAI Agent created with model: %s", model.model_name)
     return agent

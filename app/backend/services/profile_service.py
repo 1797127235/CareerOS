@@ -1,30 +1,14 @@
-"""画像服务 — 简历文本提取 + LLM 解析 + 写 DB"""
+"""画像服务 — 简历文本提取 + LLM 解析 + 写入 .md 文件"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.agent.llm_router import chat as llm_chat
-from app.backend.models.user import User, UserProfile
-from app.backend.schemas.profile import (
-    PortfolioLink,
-    ProfileResponse,
-    ProfileUpdate,
-    ProjectItem,
-    ResumeUploadResponse,
-    SkillItem,
-    WorkExperienceItem,
-)
-from app.backend.services.skill_service import create_skill
-from app.backend.utils.date_utils import restore_dates
-from app.backend.utils.json_utils import extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -82,575 +66,142 @@ def _extract_with_markitdown(content: bytes, filename: str) -> str:
 
 
 # ═══════════════════════════════════════════════
-# LLM 解析 → UserProfile
+# LLM 解析 → Markdown
 # ═══════════════════════════════════════════════
 
-_PROFILE_SCHEMA_EXAMPLE = """{
-  "name": "张三",
-  "school_name": "清华大学",
-  "school_level": "985",
-  "major": "计算机科学与技术",
-  "graduation_year": 2026,
-  "grade": "junior",
-  "target_direction": "后端",
-  "target_company_level": "top",
-  "bio": "热爱技术的CS学生，有扎实的算法基础和项目经验",
-  "city": "北京",
-  "english_level": "CET-6 550",
-  "expected_salary": "15k-20k",
-  "work_experience": [
-    {
-      "company": "字节跳动",
-      "role": "后端开发实习",
-      "period": "2024.06 - 2024.09",
-      "description": "Go + Kitex 做内容审核中台，日均5亿请求"
-    }
-  ],
-  "projects": [
-    {
-      "title": "校园二手书交易平台",
-      "tech_stack": "Spring Boot + MySQL + Redis",
-      "role": "后端开发",
-      "period": "2023.09 - 2024.01",
-      "description": "小组4人项目，负责后端。上线后注册用户2k+。"
-    },
-    {
-      "title": "高性能网络库",
-      "tech_stack": "C++ + epoll + Reactor模式",
-      "role": "独立开发",
-      "period": "2025.03 - 2025.06",
-      "description": "基于Reactor模型实现非阻塞IO网络库，支持高并发"
-    }
-  ],
-  "current_skills": [
-    { "name": "Python", "level": "advanced", "context": "竞赛主力语言" },
-    { "name": "Go", "level": "intermediate", "context": "实习中常用" }
-  ],
-  "education": {
-    "gpa": "3.8/4.0",
-    "ranking": "前10%",
-    "awards": ["国家奖学金", "ACM 银牌"]
-  },
-  "portfolio_links": [
-    { "label": "GitHub", "url": "https://github.com/xxx" }
-  ]
-}"""
+_PROFILE_EXTRACT_PROMPT = """从简历中提取信息，直接输出结构化的 Markdown 格式。
 
-_PROFILE_EXTRACT_PROMPT = """Parse this resume into JSON. Output ONLY the JSON object, no other text.
+输出要求：
+1. 严格按照下面的模板格式输出
+2. 只输出 Markdown 内容，不要有任何其他文字
+3. 如果某个字段简历中没有提到，填写"（待填写）"
+4. 不要添加简历中没有的信息
 
-Example output format:
-{schema}
+输出模板：
 
-Rules:
-- Use "" for missing text fields, [] for missing arrays, null for missing optional fields
-- projects[] is REQUIRED whenever the resume has a project block (e.g. Chinese headings: 项目经验 / 项目经历 / 个人项目 / 课程设计 / 科研经历). Output one object per project with title, period, role, tech_stack, description taken from the resume. Do NOT leave projects empty while copying the same narrative only into current_skills[].context — skills should be short proficiency notes; long bullet lists under a project belong in projects[].description.
-- Extract ALL other projects mentioned only inside skill paragraphs as separate projects[] entries too.
-- skill level: "beginner" / "familiar" / "intermediate" / "advanced"
-- school_level: "985" / "211" / "double_first_class" / "normal"
-- grade: "freshman" / "sophomore" / "junior" / "senior" / "graduate1" / "graduate2" / "graduate3"
-- target_direction: "后端" / "前端" / "算法" / "AI" / "测试" / "运维" / "安全" / "客户端" / "数据" / "嵌入式" / "其他"
-- target_company_level: "top" / "major" / "medium" / "state_owned"
-- Do NOT add any skill, project, or achievement not explicitly mentioned in the resume
-- Do NOT upgrade skill levels or embellish descriptions
-- Current year is {current_year}
+# 用户核心记忆
 
-Resume to parse:
+> 这个文件由 AI 自动管理，记录用户的核心信息。
+> 每次对话开始时会自动注入到 system prompt。
+
+## 基础信息
+- 学校：（从简历提取）
+- 专业：（从简历提取）
+- 年级：（从简历提取）
+- 毕业年份：（从简历提取）
+- 学校层次：（从简历提取）
+
+## 目标方向
+- 目标岗位：（从简历提取）
+- 目标公司类型：（从简历提取）
+- 意向城市：（从简历提取）
+
+## 教育背景
+- GPA：（从简历提取）
+- 排名：（从简历提取）
+- 获奖：（从简历提取）
+
+## 当前状态
+- 正在学习：（待填写）
+- 正在准备：（待填写）
+- 焦虑程度：（待填写）
+
+## 个人简介
+（从简历提取）
+
+## 英语水平
+（从简历提取）
+
+## 期望薪资
+（从简历提取）
+
+---
+
+技能部分请用以下格式（单独输出）：
+
+# 技能列表
+
+## 已掌握技能
+
+### 技能名称
+- 状态：了解/熟悉/精通/专家
+- 备注：xxx
+
+---
+
+项目经历请用以下格式（单独输出）：
+
+# 项目经历
+
+## 项目经历
+
+### 项目名称
+- 时间：xxx
+- 技术栈：xxx
+- 角色：xxx
+- 描述：xxx
+
+---
+
+工作经历请用以下格式（单独输出）：
+
+# 工作经历
+
+## 实习经历
+
+### 公司名称 - 岗位
+- 时间：xxx
+- 描述：xxx
+
+---
+
+年级映射：
+- 大一=freshman, 大二=sophomore, 大三=junior, 大四=senior
+- 研一=graduate1, 研二=graduate2, 研三=graduate3
+
+学校层次映射：
+- 985/211/双一流/普通本科
+
+目标方向可选：后端/前端/算法/AI/测试/运维/安全/客户端/数据/嵌入式/其他
+
+目标公司类型可选：top(头部大厂)/major(一线大厂)/medium(中型企业)/state_owned(国企)
+
+技能水平可选：beginner(了解)/familiar(熟悉)/intermediate(熟练)/advanced(精通)
+
+简历内容：
 {resume_text}"""
 
 
-_PROJECT_HEADINGS = ("项目经验", "项目经历", "个人项目", "科研经历")
-_PROJECT_END_HEADINGS = (
-    "技能特长",
-    "专业技能",
-    "技能",
-    "实习经历",
-    "工作经历",
-    "教育背景",
-    "荣誉奖项",
-    "获奖经历",
-    "自我评价",
-    "个人评价",
-)
-_PERIOD_LINE_RE = re.compile(
-    r"^\d{4}[-./]\d{1,2}\s*[~\-–—]\s*(?:\d{4}[-./]\d{1,2}|至今|现在|Present|Current)$",
-    re.IGNORECASE,
-)
-
-
-def _is_truncated(data: dict, resume_text: str) -> bool:
-    """检测解析结果是否可能被截断，或漏填 projects（模型常把项目写进技能 context）。"""
-    if not isinstance(data, dict):
-        return True
-    for key in ("current_skills", "education"):
-        if key in data and data[key] == []:
-            return True
-    if any(h in resume_text for h in _PROJECT_HEADINGS):
-        pr = data.get("projects")
-        if not isinstance(pr, list) or len(pr) == 0:
-            return True
-    return False
-
-
-_RETRY_PROJECTS_NUDGE = (
-    "\n\n[Retry instruction] The resume contains a project section (e.g. 项目经验). "
-    "Your previous JSON had empty or missing projects[]. Fill projects[] with one object per "
-    "project from that section (title, period, role, tech_stack, description). Output ONLY JSON."
-)
-
-
-async def _llm_extract(raw_text: str) -> dict:
-    """调用 LLM 从简历文本提取结构化画像"""
+async def _llm_extract_to_markdown(raw_text: str) -> str:
+    """调用 LLM 从简历文本提取信息，直接输出 Markdown 格式"""
     truncated = raw_text[:_LLM_TRUNCATION_LENGTH]
-    base_prompt = _PROFILE_EXTRACT_PROMPT.format(
-        schema=_PROFILE_SCHEMA_EXAMPLE,
+    prompt = _PROFILE_EXTRACT_PROMPT.format(
         current_year=datetime.now().year,
         resume_text=truncated,
     )
 
-    for attempt in range(_MAX_RETRIES):
-        user_content = base_prompt + (_RETRY_PROJECTS_NUDGE if attempt > 0 else "")
-        result = await llm_chat(
-            task_type="skill_analysis",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a JSON extraction engine. Output only valid JSON, no explanations.",
-                },
-                {"role": "user", "content": user_content},
-            ],
-            temperature=_LLM_TEMPERATURE,
-            max_tokens=_LLM_MAX_TOKENS,
-        )
-
-        data = extract_json(result)
-        if _is_truncated(data, truncated) and attempt < _MAX_RETRIES - 1:
-            logger.warning("LLM 输出可能被截断或漏填 projects，重试 (%d/%d)", attempt + 1, _MAX_RETRIES)
-            continue
-        data = restore_dates(data, raw_text)
-        _ensure_projects_from_text(data, raw_text)
-        return data
-    return {}
-
-
-def _ensure_projects_from_text(data: dict, raw_text: str) -> None:
-    """LLM 漏填 projects 时，从简历的项目区块做确定性兜底解析。"""
-    if not isinstance(data, dict):
-        return
-    if isinstance(data.get("projects"), list) and data["projects"]:
-        return
-    projects = _extract_projects_from_project_section(raw_text)
-    if projects:
-        data["projects"] = projects
-
-
-def _extract_projects_from_project_section(raw_text: str) -> list[dict]:
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    start = next(
-        (i for i, line in enumerate(lines) if any(h in line for h in _PROJECT_HEADINGS)),
-        None,
-    )
-    if start is None:
-        return []
-
-    end = len(lines)
-    for i in range(start + 1, len(lines)):
-        if any(h in lines[i] for h in _PROJECT_END_HEADINGS):
-            end = i
-            break
-
-    section = lines[start + 1 : end]
-    projects: list[dict] = []
-    i = 0
-    while i < len(section):
-        if not _PERIOD_LINE_RE.match(section[i]):
-            i += 1
-            continue
-
-        period = section[i]
-        title = section[i + 1] if i + 1 < len(section) else ""
-        role = None
-        body_start = i + 2
-        if body_start < len(section) and _looks_like_project_role(section[body_start]):
-            role = section[body_start]
-            body_start += 1
-
-        j = body_start
-        body: list[str] = []
-        while j < len(section) and not _PERIOD_LINE_RE.match(section[j]):
-            body.append(section[j])
-            j += 1
-
-        tech_stack = _extract_labeled_value(body, "技术栈")
-        description_parts = [_clean_project_line(part) for part in body if not part.startswith("【源码地址】")]
-        description = " ".join(part for part in description_parts if part).strip()
-        if title and description:
-            projects.append(
-                {
-                    "title": title,
-                    "tech_stack": tech_stack,
-                    "role": role,
-                    "period": period,
-                    "description": description,
-                }
-            )
-        i = j
-
-    return projects
-
-
-def _looks_like_project_role(value: str) -> bool:
-    return (
-        len(value) <= 20
-        and not value.startswith("【")
-        and not value.startswith("·")
-        and not _PERIOD_LINE_RE.match(value)
+    result = await llm_chat(
+        task_type="skill_analysis",
+        messages=[
+            {
+                "role": "system",
+                "content": "你是一个简历解析助手。从简历中提取信息，按照指定的 Markdown 格式输出。只输出 Markdown 内容，不要有任何其他文字。",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=_LLM_TEMPERATURE,
+        max_tokens=_LLM_MAX_TOKENS,
     )
 
+    # 清理输出，确保是 Markdown 格式
+    result = result.strip()
+    if not result.startswith("#"):
+        # 如果 LLM 没有以 # 开头，尝试提取 Markdown 部分
+        lines = result.split("\n")
+        md_start = next((i for i, line in enumerate(lines) if line.startswith("#")), 0)
+        result = "\n".join(lines[md_start:])
 
-def _extract_labeled_value(parts: list[str], label: str) -> str | None:
-    prefix = f"【{label}】"
-    for part in parts:
-        if part.startswith(prefix):
-            return part.removeprefix(prefix).strip(" ：:")
-    return None
-
-
-def _clean_project_line(value: str) -> str:
-    """移除项目描述行中的标签前缀（如【技术栈】）和源码地址标记。"""
-    return re.sub(r"^【[^】]+】\s*|【源码地址】", "", value).strip()
-
-
-# ═══════════════════════════════════════════════
-# DB 读写
-# ═══════════════════════════════════════════════
-
-
-def _set_if_exists(obj, field: str, value):
-    """仅当 value 非 None 时才设置字段，防止空数据覆盖已有值"""
-    if value is not None:
-        setattr(obj, field, value)
-
-
-def _set_ext(pdata: dict, data: dict, key: str, default=None):
-    """条件写入 profile_data 扩展字段：有值写入，None 时删除。"""
-    v = data.get(key)
-    if v is not None and v != [] and v != "" and v != default:
-        pdata[key] = v
-    elif v is None:
-        pdata.pop(key, None)
-
-
-def _build_list_from_pdata(pdata: dict, key: str, factory):
-    """从 profile_data 读取列表字段，用 factory 转换每个 dict 元素。空或无效返回 None。"""
-    raw = pdata.get(key)
-    if not isinstance(raw, list) or not raw:
-        return None
-    built = [factory(item) for item in raw if isinstance(item, dict)]
-    return built or None
-
-
-async def _save_profile(db: AsyncSession, user_id: str, data: dict) -> ProfileResponse:
-    """将 LLM 提取结果写入 User + UserProfile"""
-    # 确保 User 记录存在
-    user = await db.get(User, user_id)
-    if user is None:
-        user = User(user_id=user_id, nickname=data.get("name"))
-        db.add(user)
-        await db.flush()
-        logger.info("自动创建用户: user_id=%s", user_id)
-    elif data.get("name"):
-        user.nickname = data["name"]
-
-    # 2. 更新或创建 UserProfile
-    result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-    profile = result.scalar_one_or_none()
-
-    if profile is None:
-        profile = UserProfile(user_id=user_id)
-        db.add(profile)
-
-    # 映射字段 — 仅当有值时才覆盖，防止空数据清空已有画像
-    _set_if_exists(profile, "school_name", data.get("school_name"))
-    _set_if_exists(profile, "school_level", data.get("school_level"))
-    _set_if_exists(profile, "major", data.get("major"))
-    _set_if_exists(profile, "grade", _map_grade(data.get("grade")))
-    _set_if_exists(profile, "graduation_year", data.get("graduation_year"))
-    _set_if_exists(profile, "target_direction", _map_direction(data.get("target_direction")))
-    _set_if_exists(profile, "target_company_level", data.get("target_company_level"))
-
-    skills_context: dict[str, str] = {}
-    skills = data.get("current_skills")
-    if isinstance(skills, list):
-        if not skills:
-            # 空列表：清空旧技能
-            profile.current_skills = []
-        else:
-            # 标准化为 [{"skill": name, "level": level}, ...]
-            normalized = []
-            for s in skills:
-                if isinstance(s, str):
-                    normalized.append({"skill": s, "level": _DEFAULT_SKILL_LEVEL})
-                elif isinstance(s, dict):
-                    name = s.get("name") or s.get("skill") or ""
-                    normalized.append(
-                        {
-                            "skill": name,
-                            "level": s.get("level", _DEFAULT_SKILL_LEVEL),
-                        }
-                    )
-                    ctx = s.get("context")
-                    if name and ctx:
-                        skills_context[name] = ctx
-            profile.current_skills = normalized
-
-    # 双写：扩展画像数据 → profile_data JSON,不动 ORM 列
-    pdata = dict(profile.profile_data or {})
-    edu = data.get("education") if isinstance(data.get("education"), dict) else None
-    if edu:
-        edu_clean: dict = {}
-        if edu.get("gpa"):
-            edu_clean["gpa"] = edu["gpa"]
-        if edu.get("ranking"):
-            edu_clean["ranking"] = edu["ranking"]
-        awards = edu.get("awards")
-        if isinstance(awards, list) and awards:
-            edu_clean["awards"] = [str(a) for a in awards if a]
-        if edu_clean:
-            pdata["education"] = {**(pdata.get("education") or {}), **edu_clean}
-    if skills_context:
-        pdata["skills_context"] = {**(pdata.get("skills_context") or {}), **skills_context}
-
-    # ── 扩展字段：直接存入 profile_data，不映射、不转换 ──
-    for key in ("bio", "city", "english_level", "expected_salary"):
-        _set_ext(pdata, data, key)
-    _set_ext(pdata, data, "work_experience", default=[])
-    _set_ext(pdata, data, "projects", default=[])
-    _set_ext(pdata, data, "portfolio_links", default=[])
-
-    profile.profile_data = pdata
-
-    await db.flush()
-    return _profile_to_response(profile, data.get("name"))
-
-
-def _map_grade(grade: str | None) -> str | None:
-    """标准化年级值"""
-    if not grade:
-        return None
-    valid = {
-        "freshman",
-        "sophomore",
-        "junior",
-        "senior",
-        "graduate1",
-        "graduate2",
-        "graduate3",
-    }
-    return grade if grade in valid else None
-
-
-def _map_direction(direction: str | None) -> str | None:
-    """标准化方向值"""
-    if not direction:
-        return None
-    valid = {"后端", "前端", "算法", "AI", "测试", "运维", "安全", "客户端", "数据", "嵌入式", "其他"}
-    return direction if direction in valid else None
-
-
-async def get_profile(db: AsyncSession, user_id: str) -> ProfileResponse:
-    """读取用户画像"""
-    result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-    profile = result.scalar_one_or_none()
-
-    # 同时查 nickname
-    user = await db.get(User, user_id)
-    nickname = user.nickname if user else None
-
-    return _profile_to_response(profile, nickname) if profile else ProfileResponse(nickname=nickname)
-
-
-async def update_profile(db: AsyncSession, user_id: str, patch: ProfileUpdate) -> ProfileResponse:
-    """局部更新用户画像"""
-    result = await db.execute(select(UserProfile).where(UserProfile.user_id == user_id))
-    profile = result.scalar_one_or_none()
-
-    if profile is None:
-        profile = UserProfile(user_id=user_id)
-        db.add(profile)
-
-    set_fields = patch.model_fields_set
-    indirect = {
-        "current_skills",
-        "nickname",
-        "gpa",
-        "ranking",
-        "awards",
-        "bio",
-        "city",
-        "english_level",
-        "expected_salary",
-        "portfolio_links",
-        "projects",
-        "work_experience",
-    }
-    patch_data = patch.model_dump(exclude_unset=True, exclude=indirect)
-
-    for key, value in patch_data.items():
-        setattr(profile, key, value)
-
-    pdata = dict(profile.profile_data or {})
-
-    if "current_skills" in set_fields:
-        skills = patch.current_skills or []
-        profile.current_skills = [{"skill": s.name, "level": s.level} for s in skills]
-        existing_ctx = pdata.get("skills_context") or {}
-        new_ctx = {s.name: s.context for s in skills if s.context}
-        merged = {**existing_ctx, **new_ctx}
-        for s in skills:
-            if not s.context:
-                merged.pop(s.name, None)
-        pdata["skills_context"] = merged if merged else None
-
-    edu_keys = {"gpa", "ranking", "awards"} & set_fields
-    if edu_keys:
-        edu = dict(pdata.get("education") or {})
-        for k in edu_keys:
-            v = getattr(patch, k)
-            if v is None or (k == "awards" and not v):
-                edu.pop(k, None)
-            else:
-                edu[k] = v
-        if edu:
-            pdata["education"] = edu
-        else:
-            pdata.pop("education", None)
-
-    # ── 扩展字段：直接写入 profile_data ──
-    for key in ("bio", "city", "english_level", "expected_salary"):
-        if key in set_fields:
-            v = getattr(patch, key)
-            if v:
-                pdata[key] = v
-            else:
-                pdata.pop(key, None)
-
-    _list_serializers = {
-        "portfolio_links": lambda p: {"label": p.label, "url": p.url},
-        "projects": lambda p: {
-            "title": p.title,
-            "tech_stack": p.tech_stack,
-            "role": p.role,
-            "period": p.period,
-            "description": p.description,
-        },
-        "work_experience": lambda w: {
-            "company": w.company,
-            "role": w.role,
-            "period": w.period,
-            "description": w.description,
-        },
-    }
-    for key, serializer in _list_serializers.items():
-        if key not in set_fields:
-            continue
-        items = getattr(patch, key)
-        if items:
-            pdata[key] = [serializer(i) for i in items]
-        else:
-            pdata.pop(key, None)
-
-    profile.profile_data = pdata
-
-    if "nickname" in set_fields:
-        user = await db.get(User, user_id)
-        if user:
-            user.nickname = patch.nickname
-
-    await db.flush()
-    user = await db.get(User, user_id)
-    return _profile_to_response(profile, user.nickname if user else None)
-
-
-async def reset_profile(db: AsyncSession, user_id: str) -> ProfileResponse:
-    """清空用户画像 — 删 UserProfile 行,保留 User 行与 nickname"""
-    await db.execute(delete(UserProfile).where(UserProfile.user_id == user_id))
-    await db.flush()
-    user = await db.get(User, user_id)
-    return ProfileResponse(nickname=user.nickname if user else None)
-
-
-def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> ProfileResponse:
-    """ORM → 响应模型"""
-    if profile is None:
-        return ProfileResponse(nickname=nickname)
-
-    pdata = profile.profile_data or {}
-    skills_ctx = pdata.get("skills_context") or {}
-    edu = pdata.get("education") or {}
-
-    raw_skills = profile.current_skills or []
-    skills = []
-    if isinstance(raw_skills, list):
-        for s in raw_skills:
-            if isinstance(s, dict):
-                name = s.get("skill") or s.get("name") or ""
-                skills.append(
-                    SkillItem(
-                        name=name,
-                        level=s.get("level", _DEFAULT_SKILL_LEVEL),
-                        context=skills_ctx.get(name) if name else None,
-                    )
-                )
-
-    awards = edu.get("awards") if isinstance(edu.get("awards"), list) else None
-
-    # ── 扩展字段：直接从 profile_data 读，不做任何字段名映射 ──
-    portfolio_links = _build_list_from_pdata(
-        pdata, "portfolio_links", lambda p: PortfolioLink(label=p.get("label", ""), url=p.get("url", ""))
-    )
-    projects = _build_list_from_pdata(
-        pdata,
-        "projects",
-        lambda p: ProjectItem(
-            title=p.get("title", ""),
-            tech_stack=p.get("tech_stack"),
-            role=p.get("role"),
-            period=p.get("period", ""),
-            description=p.get("description", ""),
-        ),
-    )
-    work_experience = _build_list_from_pdata(
-        pdata,
-        "work_experience",
-        lambda w: WorkExperienceItem(
-            company=w.get("company", ""),
-            role=w.get("role", ""),
-            period=w.get("period", ""),
-            description=w.get("description", ""),
-        ),
-    )
-
-    return ProfileResponse(
-        nickname=nickname,
-        school_name=profile.school_name,
-        school_level=profile.school_level,
-        major=profile.major,
-        grade=profile.grade,
-        graduation_year=profile.graduation_year,
-        target_direction=profile.target_direction,
-        target_company_level=profile.target_company_level,
-        current_skills=skills if skills else None,
-        gpa=edu.get("gpa"),
-        ranking=edu.get("ranking"),
-        awards=awards if awards else None,
-        bio=pdata.get("bio"),
-        city=pdata.get("city"),
-        english_level=pdata.get("english_level"),
-        expected_salary=pdata.get("expected_salary"),
-        portfolio_links=portfolio_links if portfolio_links else None,
-        projects=projects if projects else None,
-        work_experience=work_experience if work_experience else None,
-    )
+    return result
 
 
 # ═══════════════════════════════════════════════
@@ -658,60 +209,53 @@ def _profile_to_response(profile: UserProfile | None, nickname: str | None) -> P
 # ═══════════════════════════════════════════════
 
 
-async def process_resume(db: AsyncSession, user_id: str, file: UploadFile) -> ResumeUploadResponse:
-    """完整管线：上传简历 → 返回画像"""
+async def process_resume_to_memory(file: UploadFile) -> dict:
+    """完整管线：上传简历 → 解析 → 写入 .md 文件
+
+    Returns:
+        dict: 包含 success, message, preview 字段
+    """
     filename = file.filename or "unknown"
 
     # 1. 文本提取
     try:
         raw_text = await _extract_text(file)
-        logger.info("[1/4] 文本提取成功: %s, %d chars", filename, len(raw_text))
+        logger.info("[1/3] 文本提取成功: %s, %d chars", filename, len(raw_text))
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("[1/4] 文本提取失败: %s", filename)
+        logger.exception("[1/3] 文本提取失败: %s", filename)
         raise HTTPException(status_code=422, detail=f"文件读取失败: {e}")
 
-    # 2. LLM 解析
+    # 2. LLM 解析 → Markdown
     try:
-        data = await _llm_extract(raw_text)
-        if not data:
-            raise HTTPException(status_code=422, detail="LLM 未返回有效 JSON，请确认简历内容清晰可读")
-        logger.info("[2/4] LLM 解析成功: fields=%s", list(data.keys()))
+        markdown_content = await _llm_extract_to_markdown(raw_text)
+        if not markdown_content or len(markdown_content) < 50:
+            raise HTTPException(status_code=422, detail="LLM 未返回有效内容，请确认简历内容清晰可读")
+        logger.info("[2/3] LLM 解析成功: %d chars", len(markdown_content))
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("[2/4] LLM 解析失败")
+        logger.exception("[2/3] LLM 解析失败")
         raise HTTPException(status_code=502, detail=f"AI 解析失败: {e}")
 
-    # 3. 写入 DB
+    # 3. 写入 .md 文件
     try:
-        profile = await _save_profile(db, user_id, data)
-        logger.info("[3/4] 画像保存成功: user_id=%s", user_id)
-    except Exception as e:
-        logger.exception("[3/4] 画像保存失败")
-        raise HTTPException(status_code=500, detail=f"数据保存失败: {e}")
+        # 导入 memory_service 的写入函数
+        from app.backend.services.memory_service import write_memory
 
-    # 3.5 同步简历技能到 SkillRecord 表
-    skills = data.get("current_skills")
-    if isinstance(skills, list) and skills:
-        synced = 0
-        for s in skills:
-            if isinstance(s, dict):
-                name = s.get("name") or s.get("skill") or ""
-                if name:
-                    await create_skill(
-                        db,
-                        user_id=user_id,
-                        skill_name=name,
-                        proficiency=s.get("level"),
-                        context=s.get("context"),
-                        source="resume",
-                    )
-                    synced += 1
-        if synced:
-            logger.info("[3/4] 技能同步到 SkillRecord: %d 条", synced)
+        # 直接写入 memory.md
+        write_memory(markdown_content)
+        logger.info("[3/3] 画像保存成功: memory.md")
+    except Exception as e:
+        logger.exception("[3/3] 画像保存失败")
+        raise HTTPException(status_code=500, detail=f"数据保存失败: {e}")
 
     # 4. 返回结果
     preview = raw_text[:_PREVIEW_LENGTH].replace("\n", " ")
-    return ResumeUploadResponse(profile=profile, raw_text_preview=preview)
+    return {
+        "success": True,
+        "message": "简历解析成功，已写入 memory.md",
+        "preview": preview,
+        "content_length": len(markdown_content),
+    }

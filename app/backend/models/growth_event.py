@@ -27,13 +27,13 @@ class GrowthEvent(Base):
         nullable=False,
         index=True,
         # "profile_updated" | "skill_added" | "skill_level_changed" |
-        # "jd_diagnosed" | "target_created" | "target_status_changed" |
+        # "target_created" | "target_status_changed" |
         # "reflection_added" | "project_added" | "resume_uploaded"
     )
     entity_type: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
-        # "profile" | "skill" | "jd" | "target" | "reflection" | "project"
+        # "profile" | "skill" | "target" | "reflection" | "project"
     )
     entity_id: Mapped[str | None] = mapped_column(
         String(64),

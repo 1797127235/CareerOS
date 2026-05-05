@@ -11,7 +11,7 @@ from sqlalchemy import text
 from app.backend.config import apply_user_config, get_settings
 from app.backend.db.base import Base, get_engine, init_db
 from app.backend.models import *  # noqa — 确保所有模型注册到 Base
-from app.backend.routers import chat, config_router, health, jd, memory, profile, skills
+from app.backend.routers import chat, config_router, health, memory, profile, skills
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
 async def _migrate_sqlite(conn):
     """幂等加列：create_all 不 ALTER 已有表，SQLite 需手动补列。"""
     for sql in [
+        "DROP TABLE IF EXISTS jd_diagnoses",
         "ALTER TABLE conversations ADD COLUMN summary TEXT",
     ]:
         try:
@@ -74,7 +75,6 @@ app.include_router(health.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
-app.include_router(jd.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
 app.include_router(config_router.router, prefix="/api")
 
