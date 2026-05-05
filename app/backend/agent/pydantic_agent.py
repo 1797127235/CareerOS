@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+from typing import TYPE_CHECKING
 
 from app.backend.agent.deps import CareerOSDeps
-from app.backend.agent.pydantic_tools import register_tools
 from app.backend.config import get_settings
+
+if TYPE_CHECKING:
+    from pydantic_ai import Agent
+    from pydantic_ai.models.openai import OpenAIChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,9 @@ def _create_model() -> OpenAIChatModel:
     Raises:
         ValueError: 如果未配置 API Key
     """
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider
+
     settings = get_settings()
 
     provider = settings.llm_provider or "dashscope"
@@ -53,6 +56,7 @@ def _create_model() -> OpenAIChatModel:
             base_url=base_url,
             api_key=api_key,
         ),
+        max_tokens=4096,
     )
 
 
@@ -62,6 +66,10 @@ def create_agent() -> Agent[CareerOSDeps, str]:
     Returns:
         配置好的 PydanticAI Agent
     """
+    from pydantic_ai import Agent, RunContext
+
+    from app.backend.agent.pydantic_tools import register_tools
+
     model = _create_model()
 
     agent = Agent(
