@@ -1,4 +1,10 @@
-"""将已提交的成长事件投影为 Markdown 快照。"""
+"""将已提交的成长事件投影为 Markdown 快照。
+
+简化为 3 个文件：
+- memory.md: 核心画像 + 状态 + 目标 + 偏好 + 决策
+- skills.md: 技能
+- experiences.md: 经历
+"""
 
 from __future__ import annotations
 
@@ -15,17 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.backend.config import USER_DATA_DIR
 from app.backend.db.base import get_async_session_maker
 from app.backend.models.growth_event import GrowthEvent
-from app.backend.services.memory_service import (
-    _default_entity_template,
-    _default_memory_template,
-    ensure_memory_dirs,
-)
+from app.backend.services.memory_service import ensure_memory_dirs
 
 logger = logging.getLogger(__name__)
 
 # 字符限制（非 token），控制 system prompt 长度
-MEMORY_CHAR_LIMIT = 3000  # memory.md
-ENTITY_CHAR_LIMIT = 2000  # 每个实体文件
+MEMORY_CHAR_LIMIT = 5000  # memory.md（合并后增大）
+SKILLS_CHAR_LIMIT = 2000  # skills.md
+EXPERIENCES_CHAR_LIMIT = 2000  # experiences.md
 
 
 def _deep_merge(base: dict, update: dict) -> dict:
@@ -130,17 +133,18 @@ def _merge_experience_events(events: list[GrowthEvent]) -> list[dict]:
     return experiences
 
 
-def _merge_preference_events(events: list[GrowthEvent]) -> dict:
-    preferences: dict = {}
+def _merge_dict_events(events: list[GrowthEvent]) -> dict:
+    """合并偏好、状态、目标等字典类型事件。"""
+    result: dict = {}
     for event in events:
         payload = _load_payload(event)
         if not payload:
             continue
         if payload.get("section") and "content" in payload:
-            preferences[payload["section"]] = payload["content"]
+            result[payload["section"]] = payload["content"]
         else:
-            preferences.update(payload)
-    return preferences
+            result.update(payload)
+    return result
 
 
 def _merge_decision_events(events: list[GrowthEvent]) -> list[dict]:
@@ -167,33 +171,14 @@ def _merge_decision_events(events: list[GrowthEvent]) -> list[dict]:
     return decisions
 
 
-def _merge_status_events(events: list[GrowthEvent]) -> dict:
-    status: dict = {}
-    for event in events:
-        payload = _load_payload(event)
-        if not payload:
-            continue
-        if payload.get("section") and "content" in payload:
-            status[payload["section"]] = payload["content"]
-        else:
-            status.update(payload)
-    return status
-
-
-def _merge_goal_events(events: list[GrowthEvent]) -> dict:
-    goals: dict = {}
-    for event in events:
-        payload = _load_payload(event)
-        if not payload:
-            continue
-        if payload.get("section") and "content" in payload:
-            goals[payload["section"]] = payload["content"]
-        else:
-            goals.update(payload)
-    return goals
-
-
-def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: dict) -> str:
+def _generate_memory_md(
+    profile: dict,
+    preferences: dict,
+    status: dict,
+    goals: dict,
+    decisions: list[dict],
+) -> str:
+    """生成 memory.md：核心画像 + 状态 + 目标 + 偏好 + 决策。"""
     snapshot = profile.get("__memory_md_snapshot")
     if isinstance(snapshot, str) and snapshot.strip():
         return snapshot
@@ -203,6 +188,8 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
     parts.append("> 这个文件由 AI 自动管理，记录用户的核心信息。")
     parts.append("> 每次对话开始时会自动注入到 system prompt。")
     parts.append("")
+
+    # 基础信息
     parts.append("## 基础信息")
     parts.append(f"- 学校：{profile.get('school_name', '（待填写）')}")
     parts.append(f"- 专业：{profile.get('major', '（待填写）')}")
@@ -211,6 +198,8 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
     if profile.get("school_level"):
         parts.append(f"- 学校层次：{profile['school_level']}")
     parts.append("")
+
+    # 目标方向
     parts.append("## 目标方向")
     parts.append(f"- 目标岗位：{profile.get('target_direction', goals.get('target_direction', '（待填写）'))}")
     parts.append(
@@ -219,6 +208,7 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
     parts.append(f"- 意向城市：{profile.get('city', goals.get('city', '（待填写）'))}")
     parts.append("")
 
+    # 教育背景
     if profile.get("gpa") or profile.get("ranking") or profile.get("awards"):
         parts.append("## 教育背景")
         if profile.get("gpa"):
@@ -231,6 +221,7 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
                 parts.append(f"  - {award}")
         parts.append("")
 
+    # 当前状态
     parts.append("## 当前状态")
     if status:
         for key, value in status.items():
@@ -241,25 +232,38 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
         parts.append("- 焦虑程度：（待填写）")
     parts.append("")
 
+    # 个人简介
     if profile.get("bio"):
         parts.append("## 个人简介")
         parts.append(str(profile["bio"]))
         parts.append("")
 
+    # 英语水平
     if profile.get("english_level"):
         parts.append("## 英语水平")
         parts.append(f"- {profile['english_level']}")
         parts.append("")
 
+    # 期望薪资
     if profile.get("expected_salary"):
         parts.append("## 期望薪资")
         parts.append(f"- {profile['expected_salary']}")
         parts.append("")
 
+    # 关键偏好
     if preferences:
         parts.append("## 关键偏好")
         for key, value in preferences.items():
             parts.append(f"- {key}：{value}")
+        parts.append("")
+
+    # 重要决策
+    if decisions:
+        parts.append("## 重要决策")
+        for decision in decisions[-5:]:  # 只保留最近 5 条
+            title = decision.get("title", "未命名决策")
+            decision_text = decision.get("decision", "")
+            parts.append(f"- **{title}**：{decision_text}")
         parts.append("")
 
     parts.append(f"---\n*最后更新：{date}*")
@@ -267,6 +271,7 @@ def _generate_memory_md(profile: dict, preferences: dict, status: dict, goals: d
 
 
 def _generate_skills_md(skills: dict[str, dict]) -> str:
+    """生成 skills.md：技能列表。"""
     date = datetime.now().strftime("%Y-%m-%d")
     parts = ["# 技能列表", ""]
     parts.append("> 记录用户的技能状态，用于能力评估和学习建议。")
@@ -284,6 +289,7 @@ def _generate_skills_md(skills: dict[str, dict]) -> str:
 
 
 def _generate_experiences_md(experiences: list[dict]) -> str:
+    """生成 experiences.md：经历列表。"""
     date = datetime.now().strftime("%Y-%m-%d")
     parts = ["# 经历列表", ""]
     parts.append("> 记录用户的项目、实习、竞赛和其它成长经历。")
@@ -301,52 +307,6 @@ def _generate_experiences_md(experiences: list[dict]) -> str:
             parts.append(f"- 技术栈：{exp['tech_stack']}")
         if exp.get("description"):
             parts.append(f"- 描述：{exp['description']}")
-        parts.append("")
-    parts.append(f"---\n*最后更新：{date}*")
-    return "\n".join(parts)
-
-
-def _generate_preferences_md(preferences: dict) -> str:
-    date = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 偏好列表", ""]
-    parts.append("> 记录用户的偏好和习惯，用于个性化建议。")
-    parts.append("")
-    for key, value in preferences.items():
-        parts.append(f"## {key}")
-        parts.append(f"- {value}")
-        parts.append("")
-    parts.append(f"---\n*最后更新：{date}*")
-    return "\n".join(parts)
-
-
-def _generate_goals_md(goals: dict) -> str:
-    date = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 目标列表", ""]
-    parts.append("> 记录用户的短期和长期目标。")
-    parts.append("")
-    for key, value in goals.items():
-        parts.append(f"## {key}")
-        parts.append(f"- {value}")
-        parts.append("")
-    parts.append(f"---\n*最后更新：{date}*")
-    return "\n".join(parts)
-
-
-def _generate_decisions_md(decisions: list[dict]) -> str:
-    date = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 决策记录", ""]
-    parts.append("> 记录用户做出的重要决策。")
-    parts.append("")
-    for decision in decisions:
-        parts.append(f"### {decision.get('title', '未命名决策')}")
-        if decision.get("created_at"):
-            parts.append(f"- 时间：{decision['created_at']}")
-        if decision.get("background"):
-            parts.append(f"- 背景：{decision['background']}")
-        if decision.get("decision"):
-            parts.append(f"- 决策：{decision['decision']}")
-        if decision.get("reason"):
-            parts.append(f"- 理由：{decision['reason']}")
         parts.append("")
     parts.append(f"---\n*最后更新：{date}*")
     return "\n".join(parts)
@@ -382,24 +342,61 @@ def _write_md_file_safe(path: str, content: str, max_chars: int | None = None) -
     os.replace(temp_path, path)
 
 
+def _default_memory_template() -> str:
+    return """# 用户核心记忆
+
+> 这个文件由 AI 自动管理，记录用户的核心信息。
+> 每次对话开始时会自动注入到 system prompt。
+
+## 基础信息
+- 学校：（待填写）
+- 专业：（待填写）
+- 年级：（待填写）
+- 毕业年份：（待填写）
+
+## 目标方向
+- 目标岗位：（待填写）
+- 目标公司类型：（待填写）
+- 意向城市：（待填写）
+
+## 当前状态
+- 正在学习：（待填写）
+- 正在准备：（待填写）
+- 焦虑程度：（待填写）
+
+---
+*最后更新：待初始化*"""
+
+
+def _default_skills_template() -> str:
+    return """# 技能列表
+
+> 记录用户的技能状态，用于能力评估和学习建议。
+
+## 已掌握技能
+（待填写）
+
+---
+*最后更新：待初始化*"""
+
+
+def _default_experiences_template() -> str:
+    return """# 经历列表
+
+> 记录用户的项目、实习、竞赛和其它成长经历。
+
+（待填写）
+
+---
+*最后更新：待初始化*"""
+
+
 def _write_default_md_snapshot() -> None:
     ensure_memory_dirs()
     memory_dir = USER_DATA_DIR / "memory"
-    entities_dir = memory_dir / "entities"
     _write_md_file_safe(str(memory_dir / "memory.md"), _default_memory_template())
-    for entity_type in [
-        "skills",
-        "experiences",
-        "preferences",
-        "goals",
-        "decisions",
-        "relationships",
-        "status",
-    ]:
-        _write_md_file_safe(
-            str(entities_dir / f"{entity_type}.md"),
-            _default_entity_template(entity_type),
-        )
+    _write_md_file_safe(str(memory_dir / "skills.md"), _default_skills_template())
+    _write_md_file_safe(str(memory_dir / "experiences.md"), _default_experiences_template())
 
 
 async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
@@ -418,44 +415,44 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
         for event in events:
             events_by_type[event.event_type].append(event)
 
+        # 合并事件
         profile = _merge_profile_events(events_by_type.get("profile_updated", []))
         skills = _merge_skill_events(
             events_by_type.get("skill_added", []) + events_by_type.get("skill_level_changed", [])
         )
         experiences = _merge_experience_events(events_by_type.get("experience_added", []))
-        preferences = _merge_preference_events(events_by_type.get("preference_learned", []))
+        preferences = _merge_dict_events(events_by_type.get("preference_learned", []))
+        status = _merge_dict_events(events_by_type.get("status_changed", []))
+        goals = _merge_dict_events(events_by_type.get("goal_updated", []))
         decisions = _merge_decision_events(events_by_type.get("decision_made", []))
-        status = _merge_status_events(events_by_type.get("status_changed", []))
-        goals = _merge_goal_events(events_by_type.get("goal_updated", []))
 
+        # 写入 3 个文件
         ensure_memory_dirs()
         memory_dir = USER_DATA_DIR / "memory"
-        entities_dir = memory_dir / "entities"
 
         _write_md_file_safe(
             str(memory_dir / "memory.md"),
-            _generate_memory_md(profile, preferences, status, goals),
+            _generate_memory_md(profile, preferences, status, goals, decisions),
             max_chars=MEMORY_CHAR_LIMIT,
         )
-        _write_md_file_safe(str(entities_dir / "skills.md"), _generate_skills_md(skills), max_chars=ENTITY_CHAR_LIMIT)
         _write_md_file_safe(
-            str(entities_dir / "experiences.md"), _generate_experiences_md(experiences), max_chars=ENTITY_CHAR_LIMIT
+            str(memory_dir / "skills.md"),
+            _generate_skills_md(skills),
+            max_chars=SKILLS_CHAR_LIMIT,
         )
         _write_md_file_safe(
-            str(entities_dir / "preferences.md"), _generate_preferences_md(preferences), max_chars=ENTITY_CHAR_LIMIT
+            str(memory_dir / "experiences.md"),
+            _generate_experiences_md(experiences),
+            max_chars=EXPERIENCES_CHAR_LIMIT,
         )
-        _write_md_file_safe(str(entities_dir / "goals.md"), _generate_goals_md(goals), max_chars=ENTITY_CHAR_LIMIT)
-        _write_md_file_safe(
-            str(entities_dir / "decisions.md"), _generate_decisions_md(decisions), max_chars=ENTITY_CHAR_LIMIT
-        )
-        _write_md_file_safe(
-            str(entities_dir / "relationships.md"),
-            _default_entity_template("relationships"),
-            max_chars=ENTITY_CHAR_LIMIT,
-        )
-        _write_md_file_safe(
-            str(entities_dir / "status.md"), _default_entity_template("status"), max_chars=ENTITY_CHAR_LIMIT
-        )
+
+        # 清理旧的 entities 目录（如果存在）
+        entities_dir = memory_dir / "entities"
+        if entities_dir.exists():
+            import shutil
+
+            shutil.rmtree(entities_dir, ignore_errors=True)
+            logger.info("Removed legacy entities directory")
 
         now = datetime.utcnow()
         for event in events:

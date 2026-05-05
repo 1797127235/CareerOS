@@ -24,16 +24,31 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         if not query or not query.strip():
             return "请提供搜索关键词。"
 
-        from app.backend.services.memory_service import read_entity, search_memory
+        from app.backend.services.memory_service import read_experiences, read_memory, read_skills, search_memory
+
+        # entity_type 到文件的映射
+        entity_file_map = {
+            "memory": read_memory,
+            "skills": read_skills,
+            "experiences": read_experiences,
+            # 兼容旧的 entity_type
+            "preferences": read_memory,
+            "goals": read_memory,
+            "decisions": read_memory,
+            "status": read_memory,
+        }
 
         if entity_types:
             results = []
             for entity_type in entity_types:
-                content = read_entity(entity_type)
+                reader = entity_file_map.get(entity_type)
+                if not reader:
+                    continue
+                content = reader()
                 if content and query.lower() in content.lower():
                     results.append(
                         {
-                            "file": f"entities/{entity_type}.md",
+                            "file": f"{entity_type}.md",
                             "section": entity_type,
                             "content": content[:500],
                         }
