@@ -15,8 +15,10 @@ class CareerOSDeps:
     - user_id: 用户 ID
     - db: SQLAlchemy 异步会话
     - conversation_id: 会话 ID（用于加载历史消息）
+    - current_user_input: 当前用户输入（用于长期记忆召回）
     """
 
     user_id: str
     db: AsyncSession
     conversation_id: str | None = None
+    current_user_input: str | None = None

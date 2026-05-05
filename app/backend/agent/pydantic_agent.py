@@ -128,6 +128,27 @@ def create_agent() -> Agent[CareerOSDeps, str]:
         except Exception:
             pass  # 记忆加载失败不影响对话
 
+        # 加载长期事件记忆（L3）
+        try:
+            from app.backend.services.cognee_service import recall
+
+            if ctx.deps.current_user_input:
+                long_term_memories = await recall(
+                    user_id=ctx.deps.user_id,
+                    query=ctx.deps.current_user_input,
+                    limit=5,
+                )
+                if long_term_memories:
+                    # 截断过长的记忆
+                    truncated = []
+                    for mem in long_term_memories:
+                        if len(mem) > 200:
+                            mem = mem[:200] + "..."
+                        truncated.append(f"- {mem}")
+                    parts.append("【长期记忆】\n" + "\n".join(truncated))
+        except Exception:
+            pass  # 长期记忆加载失败不影响对话
+
         # 加载历史消息（L1 短期记忆）
         try:
             # 从 DB 加载最近 20 条消息（按 created_at 倒序）

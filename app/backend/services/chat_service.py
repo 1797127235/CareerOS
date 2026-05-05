@@ -96,7 +96,12 @@ async def stream_chat(
         from app.backend.agent.pydantic_agent import get_agent
 
         agent = get_agent()
-        deps = CareerOSDeps(user_id=user_id, db=db, conversation_id=conv.conversation_id)
+        deps = CareerOSDeps(
+            user_id=user_id,
+            db=db,
+            conversation_id=conv.conversation_id,
+            current_user_input=user_input,
+        )
 
         full_content = ""
         try:
