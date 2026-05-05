@@ -32,6 +32,9 @@ jobs:
       - name: Ruff lint
         run: ruff check app/
 
+      - name: Ruff format
+        run: ruff format app/
+
       - name: Ruff format check
         run: ruff format --check app/
 
