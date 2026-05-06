@@ -2,45 +2,6 @@ import { getUserId } from "./userId";
 
 export type SkillItem = { name: string; level: string; context?: string | null };
 
-export type Profile = {
-  nickname: string | null;
-  school_name: string | null;
-  school_level: string | null;
-  major: string | null;
-  grade: string | null;
-  graduation_year: number | null;
-  target_direction: string | null;
-  target_company_level: string | null;
-  current_skills: SkillItem[] | null;
-  gpa: string | null;
-  ranking: string | null;
-  awards: string[] | null;
-  // 履历与扩展信息
-  bio: string | null;
-  city: string | null;
-  english_level: string | null;
-  expected_salary: string | null;
-  portfolio_links: Array<{ label: string; url: string }> | null;
-  projects: Array<{
-    title: string;
-    tech_stack: string | null;
-    role: string | null;
-    period: string;
-    description: string;
-  }> | null;
-  work_experience: Array<{
-    company: string;
-    role: string;
-    period: string;
-    description: string;
-  }> | null;
-};
-
-export type ResumeUploadResponse = {
-  profile: Profile;
-  raw_text_preview: string;
-};
-
 export type TargetStatus =
   | "interested"
   | "applied"
@@ -143,34 +104,16 @@ async function http<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function getProfile(): Promise<Profile> {
-  return http<Profile>(`/api/profile/me?user_id=${encodeURIComponent(getUserId())}`);
-}
-
-export function patchProfile(patch: Partial<Profile>): Promise<Profile> {
-  return http<Profile>(
-    `/api/profile/me?user_id=${encodeURIComponent(getUserId())}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    },
+export function getMemoryContent(): Promise<{ content: string }> {
+  return http<{ content: string }>(
+    `/api/memory/me?user_id=${encodeURIComponent(getUserId())}`,
   );
 }
 
-export function resetProfile(): Promise<Profile> {
-  return http<Profile>(
-    `/api/profile/me?user_id=${encodeURIComponent(getUserId())}`,
-    { method: "DELETE" },
-  );
-}
-
-export function uploadResume(file: File): Promise<ResumeUploadResponse> {
-  const form = new FormData();
-  form.append("file", file);
-  return http<ResumeUploadResponse>(
-    `/api/profile/resume?user_id=${encodeURIComponent(getUserId())}`,
-    { method: "POST", body: form },
+export function resetMemory(): Promise<{ deleted: number }> {
+  return http<{ deleted: number }>(
+    `/api/memory/reset?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "POST" },
   );
 }
 
@@ -383,13 +326,6 @@ export type MemoryStats = {
 export function getMemoryStats(): Promise<MemoryStats> {
   return http<MemoryStats>(
     `/api/memory/stats?user_id=${encodeURIComponent(getUserId())}`,
-  );
-}
-
-export function resetMemory(): Promise<{ deleted: number }> {
-  return http<{ deleted: number }>(
-    `/api/memory/reset?user_id=${encodeURIComponent(getUserId())}`,
-    { method: "POST" },
   );
 }
 

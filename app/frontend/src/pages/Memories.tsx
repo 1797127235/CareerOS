@@ -70,7 +70,7 @@ export default function Memories() {
     };
   }, []);
 
-  const memoryUnavailable = stats !== null && stats.status !== "ready";
+  const cogneeNotReady = stats !== null && stats.status !== "ready";
 
   return (
     <div className="mx-auto max-w-[720px] px-md py-xl">
@@ -97,20 +97,19 @@ export default function Memories() {
 
       {!loading && error && <p className="text-sm text-danger">{error}</p>}
 
-      {!loading && !error && memoryUnavailable && (
-        <p className="text-sm text-text-muted">
-          记忆服务当前不可用。先去“设置”确认 LLM / Embedding Key 已保存。
-          如果你刚保存过配置，现在返回本页或点“刷新”就会重新检查状态。
+      {!loading && !error && cogneeNotReady && (
+        <p className="mb-md text-sm text-amber-600">
+          语义检索未就绪（{statusLabel(stats)}），但历史记忆仍可浏览。
         </p>
       )}
 
-      {!loading && !error && !memoryUnavailable && memories.length === 0 && (
+      {!loading && !error && memories.length === 0 && (
         <p className="text-text-muted">
           还没有记忆。聊几句之后，系统会逐步提取长期记忆。
         </p>
       )}
 
-      {!loading && !error && !memoryUnavailable && memories.length > 0 && (
+      {!loading && !error && memories.length > 0 && (
         <ul className="flex flex-col gap-xs">
           {memories.map((mem) => (
             <li

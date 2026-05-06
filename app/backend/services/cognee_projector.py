@@ -45,34 +45,15 @@ async def project_all_events(user_id: str) -> bool:
         return False
 
 
-async def project_new_events(user_id: str, since: datetime | None = None) -> int:
-    try:
-        async with get_async_session_maker()() as db:
-            query = select(GrowthEvent).where(GrowthEvent.user_id == user_id)
-            if since:
-                query = query.where(GrowthEvent.created_at > since)
-            query = query.order_by(GrowthEvent.created_at)
-            result = await db.execute(query)
-            events = result.scalars().all()
-
-            success_count = 0
-            for event in events:
-                if await project_event(event):
-                    event.projected_cognee_at = datetime.now(datetime.UTC)
-                    success_count += 1
-            await db.commit()
-            return success_count
-    except Exception as exc:
-        logger.error("Incremental projection failed: user_id=%s, error=%s", user_id, exc)
-        return 0
-
-
-async def project_event_ids(event_ids: list[str]) -> int:
+async def project_event_ids(event_ids: list[str], user_id: str | None = None) -> int:
     if not event_ids:
         return 0
     try:
         async with get_async_session_maker()() as db:
-            result = await db.execute(select(GrowthEvent).where(GrowthEvent.id.in_(event_ids)))
+            stmt = select(GrowthEvent).where(GrowthEvent.id.in_(event_ids))
+            if user_id:
+                stmt = stmt.where(GrowthEvent.user_id == user_id)
+            result = await db.execute(stmt)
             events = list(result.scalars().all())
             success_count = 0
             for event in events:

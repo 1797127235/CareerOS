@@ -62,7 +62,7 @@ def _merge_profile_events(events: list[GrowthEvent]) -> dict:
             profile = _deep_merge(profile, extract_profile_fields(payload["memory_md"]))
             continue
 
-        # Legacy: field/content 格式（旧版 profile_service）
+        # Legacy: field/content 格式
         if payload.get("field") in {"resume", "memory_md"} and isinstance(payload.get("content"), str):
             profile = _deep_merge(profile, extract_profile_fields(payload["content"]))
             continue
@@ -308,23 +308,31 @@ def _generate_experiences_md(experiences: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def _truncate_to_limit(content: str, limit: int) -> str:
-    """截断内容到字符限制，保留头部结构（标题、基础信息等）。"""
+def _truncate_to_limit(content: str, limit: int, *, keep_tail: bool = False) -> str:
+    """截断内容到字符限制。
+    keep_tail=False: 保留头部（memory.md 结构化字段在前）。
+    keep_tail=True: 保留尾部（skills/experiences 新条目在末尾）。
+    """
     if len(content) <= limit:
         return content
-    # 保留头部（结构化内容在前面）
-    truncated = content[:limit]
-    # 找到最后一个完整段落结束
-    last_newline = truncated.rfind("\n\n")
-    if last_newline > 0:
-        truncated = truncated[:last_newline]
-    logger.warning("Content truncated: %d -> %d chars", len(content), len(truncated))
+    if keep_tail:
+        truncated = content[-limit:]
+        # 找到第一个完整段落开始
+        first_newline = truncated.find("\n\n")
+        if first_newline >= 0:
+            truncated = truncated[first_newline + 2 :]
+    else:
+        truncated = content[:limit]
+        last_newline = truncated.rfind("\n\n")
+        if last_newline > 0:
+            truncated = truncated[:last_newline]
+    logger.warning("Content truncated: %d -> %d chars (keep_tail=%s)", len(content), len(truncated), keep_tail)
     return truncated
 
 
-def _write_md_file_safe(path: str, content: str, max_chars: int | None = None) -> None:
+def _write_md_file_safe(path: str, content: str, max_chars: int | None = None, *, keep_tail: bool = False) -> None:
     if max_chars is not None:
-        content = _truncate_to_limit(content, max_chars)
+        content = _truncate_to_limit(content, max_chars, keep_tail=keep_tail)
     dir_name = os.path.dirname(path)
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -388,11 +396,13 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
             str(d / "skills.md"),
             _generate_skills_md(skills),
             max_chars=SKILLS_CHAR_LIMIT,
+            keep_tail=True,
         )
         _write_md_file_safe(
             str(d / "experiences.md"),
             _generate_experiences_md(experiences),
             max_chars=EXPERIENCES_CHAR_LIMIT,
+            keep_tail=True,
         )
 
         # 清理旧的 entities 目录（如果存在）
@@ -423,6 +433,18 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
 
 async def sync_user_md_projection(user_id: str) -> bool:
     async with get_async_session_maker()() as db:
+        # dirty check：没有未投影事件则跳过全量重建
+        from sqlalchemy import func, select
+
+        dirty = await db.execute(
+            select(func.count(GrowthEvent.id)).where(
+                GrowthEvent.user_id == user_id,
+                GrowthEvent.projected_md_at.is_(None),
+            )
+        )
+        if (dirty.scalar() or 0) == 0:
+            return True  # 无需投影
+
         success = await project_user_to_md(db, user_id)
         if success:
             await db.commit()

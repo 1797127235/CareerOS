@@ -18,7 +18,9 @@ _BASE_MEMORY_DIR = USER_DATA_DIR / "memory"
 
 def memory_dir(user_id: str) -> Path:
     """返回 user_id 对应的记忆目录路径（公共 API，供外部如 md_projector 使用）。"""
-    return _BASE_MEMORY_DIR / user_id
+    # 防路径遍历：只取最后一段，丢弃 ../ 等
+    safe_id = Path(user_id).name
+    return _BASE_MEMORY_DIR / safe_id
 
 
 def ensure_memory_dirs(user_id: str) -> None:

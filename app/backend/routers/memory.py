@@ -13,14 +13,34 @@ from app.backend.agent.cognee_client import get_cognee_status
 from app.backend.db.base import get_async_session_maker
 from app.backend.models.growth_event import GrowthEvent
 from app.backend.services import cognee_service
-from app.backend.services.cognee_projector import project_all_events
-from app.backend.services.md_projector import project_user_to_md, sync_user_md_projection
+from app.backend.services.md_projector import sync_user_md_projection
+from app.backend.services.memory_service import read_memory
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 _USER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+class MemoryContent(BaseModel):
+    content: str
+
+
+@router.get("/me", response_model=MemoryContent)
+async def get_my_memory(user_id: str = Query("demo_user")) -> MemoryContent:
+    """读取用户 .md 画像内容。"""
+    _validate_user_id(user_id)
+    try:
+        content = read_memory(user_id)
+        if not content.strip():
+            projected = await sync_user_md_projection(user_id)
+            if projected:
+                content = read_memory(user_id)
+        return MemoryContent(content=content)
+    except Exception:
+        logger.exception("Read memory failed: user_id=%s", user_id)
+        raise HTTPException(status_code=500, detail="读取画像失败")
 
 
 class MemoryStats(BaseModel):
@@ -119,28 +139,18 @@ async def list_memories(user_id: str = Query("demo_user")) -> list[MemoryItem]:
 @router.post("/rebuild")
 async def rebuild_memory(user_id: str = Query("demo_user")) -> dict:
     _validate_user_id(user_id)
-    status = get_cognee_status()
 
     try:
-        async with get_async_session_maker()() as db:
-            md_success = await project_user_to_md(db, user_id)
-            if md_success:
-                await db.commit()
-            else:
-                await db.rollback()
+        from app.backend.services.careeros_memory import get_memory
 
-        cognee_success = status != "ready"
-        index_cleared = False
-        if status == "ready":
-            index_cleared = await cognee_service.clear_user_index(user_id)
-            cognee_success = index_cleared and await project_all_events(user_id)
+        result = await get_memory().rebuild(user_id)
+        md_ok = result["md_success"]
+        cognee_ok = result["cognee_success"]
 
         return {
-            "message": "重建成功" if md_success and cognee_success else ".md 已重建，但 Cognee 重建失败",
+            "message": "重建成功" if md_ok and cognee_ok else ".md 已重建，但 Cognee 重建失败",
             "user_id": user_id,
-            "md_success": md_success,
-            "cognee_success": cognee_success,
-            "index_cleared": index_cleared,
+            **result,
         }
     except HTTPException:
         raise
@@ -174,3 +184,17 @@ async def search_memories(
     except Exception as exc:
         logger.error("Memory search failed: %s", exc)
         return []
+
+
+@router.post("/compensate")
+async def compensate_cognee(user_id: str = Query("demo_user")) -> dict:
+    """补偿扫描：重试 Cognee 投影失败的事件。"""
+    _validate_user_id(user_id)
+    try:
+        from app.backend.services.careeros_memory import get_memory
+
+        fixed = await get_memory().compensate_cognee(user_id)
+        return {"user_id": user_id, "compensated": fixed}
+    except Exception as exc:
+        logger.error("Cognee compensate failed: %s", exc)
+        raise HTTPException(status_code=500, detail="补偿失败")

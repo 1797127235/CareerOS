@@ -148,7 +148,7 @@ async def update_config(body: ConfigUpdate) -> ConfigResponse:
 async def test_config(body: ConfigTestRequest) -> ConfigTestResponse:
     import time
 
-    from app.backend.agent.llm_router import chat
+    import litellm
 
     start = time.time()
 
@@ -159,15 +159,20 @@ async def test_config(body: ConfigTestRequest) -> ConfigTestResponse:
         api_key = user_config.get("llm_api_key") or settings.llm_api_key
 
     try:
-        await chat(
-            "general_chat",
-            messages=[{"role": "user", "content": "hi"}],
-            temperature=0.7,
-            max_tokens=10,
-            api_key=api_key,
-            base_url=body.base_url or None,
-            model=f"{body.provider}/{body.model}" if body.provider != "openai" else body.model,
-        )
+        model_id = f"{body.provider}/{body.model}" if body.provider != "openai" else body.model
+        kwargs: dict = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": "hi"}],
+            "temperature": 0.7,
+            "max_tokens": 10,
+            "api_key": api_key,
+            "stream": False,
+            "timeout": 30,
+        }
+        if body.base_url:
+            kwargs["base_url"] = body.base_url
+
+        await litellm.acompletion(**kwargs)
         return ConfigTestResponse(ok=True, latency_ms=int((time.time() - start) * 1000))
     except Exception as exc:
         # 只返回错误类型，不暴露内部细节

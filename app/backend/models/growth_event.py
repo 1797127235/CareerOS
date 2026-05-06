@@ -18,7 +18,8 @@ class GrowthEvent(Base):
     事件驱动写入，不是逐对话提取。
 
     字段说明：
-    - dedupe_key: 去重键，格式 "{event_type}:{entity_type}:{entity_id}"，用于精确去重
+    - dedupe_key: 去重键，SHA256("{event_type}|{entity_type}|{entity_id}|{payload_hash}")，
+      用于精确去重，避免 7 天窗口误杀
     - payload_hash: payload 的 SHA256 哈希，用于内容级去重
     - projected_md_at: 投影到 .md 文件的时间，NULL 表示未投影
     - projected_cognee_at: 投影到 Cognee 的时间，NULL 表示未投影

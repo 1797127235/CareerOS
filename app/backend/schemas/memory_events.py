@@ -10,6 +10,30 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# ── 事件类型枚举（Single Source of Truth）──
+
+EventType = Literal[
+    "profile_updated",
+    "skill_added",
+    "skill_level_changed",
+    "experience_added",
+    "preference_learned",
+    "goal_updated",
+    "status_changed",
+    "decision_made",
+]
+
+ENTITY_TYPE_MAP: dict[str, str] = {
+    "profile_updated": "profile",
+    "skill_added": "skill",
+    "skill_level_changed": "skill",
+    "experience_added": "experience",
+    "preference_learned": "preference",
+    "goal_updated": "goal",
+    "status_changed": "status",
+    "decision_made": "decision",
+}
+
 # ── profile_updated ──
 
 

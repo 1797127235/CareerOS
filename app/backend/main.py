@@ -1,6 +1,5 @@
 """CareerOS 后端入口"""
 
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,16 +9,21 @@ from sqlalchemy import text
 
 from app.backend.config import apply_user_config, get_settings
 from app.backend.db.base import Base, get_engine, init_db
+from app.backend.logging_config import RequestLoggingMiddleware, get_logger, setup_logging
 from app.backend.models import *  # noqa — 确保所有模型注册到 Base
-from app.backend.routers import chat, config_router, health, memory, profile
+from app.backend.routers import chat, config_router, health, memory
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化数据库表 + SQLite 兼容迁移 + 加载用户配置"""
     settings = get_settings()
+
+    # 初始化日志系统（生产环境 JSON，开发环境彩色控制台）
+    setup_logging(json_logs=not settings.debug, log_level="DEBUG" if settings.debug else "INFO")
+
     init_db()
     engine = get_engine()
     async with engine.begin() as conn:
@@ -28,13 +32,17 @@ async def lifespan(app: FastAPI):
             await _migrate_sqlite(conn)
     applied = apply_user_config(settings)
     if applied:
-        logger.info("config.json 覆盖: %s", list(applied.keys()))
+        logger.info("config.json 覆盖", keys=list(applied.keys()))
     # Cognee 记忆层初始化（可选，失败不阻塞启动）
     from app.backend.agent.cognee_client import init_cognee
 
     cognee_status = init_cognee()
-    logger.info("Cognee 状态: %s", cognee_status)
+    logger.info("Cognee 状态", status=cognee_status)
     yield
+    # 关闭时取消未完成的 Cognee 投影任务
+    from app.backend.services.careeros_memory import cancel_background_tasks
+
+    cancel_background_tasks()
     await engine.dispose()
 
 
@@ -53,12 +61,57 @@ async def _migrate_sqlite(conn):
         "CREATE INDEX IF NOT EXISTS ix_growth_events_unprojected_md ON growth_events (user_id, projected_md_at)",
         "CREATE INDEX IF NOT EXISTS ix_growth_events_unprojected_cognee ON growth_events (user_id, projected_cognee_at)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_growth_events_user_dedupe ON growth_events (user_id, dedupe_key)",
+        # FTS5 全文索引（独立表，非 external content，避免 UUID rowid 不兼容）
+        """CREATE VIRTUAL TABLE IF NOT EXISTS growth_events_fts USING fts5(
+            event_type, entity_type, entity_id, payload_json
+        )""",
+        # FTS5 同步触发器
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_ai AFTER INSERT ON growth_events BEGIN
+            INSERT INTO growth_events_fts(rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json);
+        END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_ad AFTER DELETE ON growth_events BEGIN
+            INSERT INTO growth_events_fts(growth_events_fts, rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json);
+        END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_au AFTER UPDATE ON growth_events BEGIN
+            INSERT INTO growth_events_fts(growth_events_fts, rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json);
+            INSERT INTO growth_events_fts(rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json);
+        END""",
+        # 回填已有数据
+        """INSERT INTO growth_events_fts(rowid, event_type, entity_type, entity_id, payload_json)
+            SELECT rowid, event_type, entity_type, entity_id, payload_json FROM growth_events
+            WHERE rowid NOT IN (SELECT rowid FROM growth_events_fts)""",
+        # Trigram FTS5：CJK 子串搜索（3 字节重叠，中文/日文/韩文友好）
+        """CREATE VIRTUAL TABLE IF NOT EXISTS growth_events_fts_trigram USING fts5(
+            event_type, entity_type, entity_id, payload_json,
+            tokenize='trigram'
+        )""",
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_tri_ai AFTER INSERT ON growth_events BEGIN
+            INSERT INTO growth_events_fts_trigram(rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json);
+        END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_tri_ad AFTER DELETE ON growth_events BEGIN
+            INSERT INTO growth_events_fts_trigram(growth_events_fts_trigram, rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json);
+        END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_growth_events_tri_au AFTER UPDATE ON growth_events BEGIN
+            INSERT INTO growth_events_fts_trigram(growth_events_fts_trigram, rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json);
+            INSERT INTO growth_events_fts_trigram(rowid, event_type, entity_type, entity_id, payload_json)
+            VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json);
+        END""",
+        """INSERT INTO growth_events_fts_trigram(rowid, event_type, entity_type, entity_id, payload_json)
+            SELECT rowid, event_type, entity_type, entity_id, payload_json FROM growth_events
+            WHERE rowid NOT IN (SELECT rowid FROM growth_events_fts_trigram)""",
     ]:
         try:
             await conn.execute(text(sql))
         except Exception as e:
             if "duplicate column" not in str(e).lower() and "already exists" not in str(e).lower():
-                logger.warning("SQLite 迁移失败: %s — %s", sql, e)
+                logger.warning("SQLite 迁移失败", sql=sql[:100], error=str(e))
 
 
 app = FastAPI(
@@ -79,12 +132,14 @@ app.add_middleware(
     allow_headers=["*"] if _settings.debug else ["Authorization", "Content-Type"],
 )
 
+# ── 请求日志中间件 ──
+app.add_middleware(RequestLoggingMiddleware)
+
 # ── API 路由 ──
 
 app.include_router(health.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
-app.include_router(profile.router, prefix="/api")
 app.include_router(config_router.router, prefix="/api")
 
 # ── 生产模式：托管前端静态文件 + SPA 路由 ──

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -12,9 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.agent.deps import CareerOSDeps
+from app.backend.logging_config import get_logger
 from app.backend.models.conversation import Conversation, Message
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # ── 摘要 ──
 
@@ -93,7 +93,7 @@ async def stream_chat(
     try:
         await db.commit()
     except Exception:
-        logger.exception("保存用户消息失败: conversation_id=%s", conv.conversation_id)
+        logger.exception("保存用户消息失败", conversation_id=conv.conversation_id)
         await db.rollback()
         yield _sse_error("消息保存失败，请稍后重试")
         return
@@ -140,27 +140,21 @@ async def stream_chat(
                     await db.commit()
                 except Exception:
                     await db.rollback()
-                    logger.warning("保存 AI 回复失败 (可能为部分): conversation_id=%s", conv.conversation_id)
+                    logger.warning("保存 AI 回复失败 (可能为部分)", conversation_id=conv.conversation_id)
 
-                # 对话后自动提取长期记忆（后台异步执行，不等待）
-                # 如果 Agent 本轮已主动调用记忆工具，跳过提取——避免双写
-                if not deps.memory_tool_called:
+                # Agent 工具创建了事件 → commit 后触发投影
+                if deps.pending_event_ids:
                     try:
-                        from app.backend.services.memory_extractor import extract_and_save_memory
+                        from app.backend.services.careeros_memory import get_memory
 
-                        task = asyncio.create_task(
-                            extract_and_save_memory(
-                                user_id=user_id,
-                                conversation_id=conv.conversation_id,
-                                user_input=user_input,
-                                assistant_reply=full_content,
-                            )
-                        )
-                        task.add_done_callback(_log_task_error)
+                        await get_memory().sync_projections(user_id, deps.pending_event_ids)
                     except Exception as e:
-                        logger.warning("对话记忆提取任务创建失败: %s", e)
+                        logger.warning("记忆投影失败", error=str(e))
+
+                # 记忆由 Agent 在对话中通过 memory_save / update_profile 工具主动写入。
+                # 不依赖后台自动提取 —— 确保可靠性（Agent 有完整上下文，最清楚什么值得记）
     except Exception:
-        logger.exception("生成 AI 回复失败: conversation_id=%s", conv.conversation_id)
+        logger.exception("生成 AI 回复失败", conversation_id=conv.conversation_id)
         await db.rollback()
         yield _sse_error("生成回复失败，请稍后重试")
         return
@@ -185,7 +179,7 @@ async def _summarize_bg(conversation_id: str) -> None:
                     return
                 await _summarize_and_persist(db, conv)
             except Exception:
-                logger.exception("后台摘要失败: conversation_id=%s", conversation_id)
+                logger.exception("后台摘要失败", conversation_id=conversation_id)
     finally:
         # 确保即使任务被取消也能清理锁
         _summary_locks.pop(conversation_id, None)
@@ -239,24 +233,39 @@ async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
         prompt = _build_summary_prompt(conv.summary or "", _format_messages(old_messages))
 
         try:
-            from app.backend.agent.llm_router import chat as llm_chat
+            import litellm
 
-            result = await llm_chat(
-                task_type="memory_summarize",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=256,
-            )
-            # llm_chat 可能返回 str 或 dict（如果有 tool_calls），确保处理两种情况
-            summary = result if isinstance(result, str) else str(result)
+            from app.backend.config import get_settings
+
+            settings = get_settings()
+            provider = settings.llm_provider or "dashscope"
+            model = settings.llm_model or "qwen-plus"
+            model_id = model if provider == "openai" else f"{provider}/{model}"
+            api_key = settings.llm_api_key or settings.dashscope_api_key or ""
+            base_url = settings.llm_base_url
+
+            kwargs: dict = {
+                "model": model_id,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 256,
+                "api_key": api_key,
+                "stream": False,
+                "timeout": 30,
+            }
+            if base_url:
+                kwargs["base_url"] = base_url
+
+            response = await litellm.acompletion(**kwargs)
+            summary = response.choices[0].message.content or ""
             conv.summary = summary.strip() if summary else None
             await db.commit()
-            logger.info("摘要已更新: conversation_id=%s, len=%d", conv.conversation_id, len(summary) if summary else 0)
+            logger.info("摘要已更新", conversation_id=conv.conversation_id, length=len(summary) if summary else 0)
         except asyncio.CancelledError:
             raise
         except Exception:
             await db.rollback()
-            logger.warning("摘要生成失败，保留旧摘要: conversation_id=%s", conv.conversation_id)
+            logger.warning("摘要生成失败，保留旧摘要", conversation_id=conv.conversation_id)
         finally:
             # 释放锁引用，防止无限增长
             _summary_locks.pop(conv.conversation_id, None)

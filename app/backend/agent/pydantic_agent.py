@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.backend.agent.deps import CareerOSDeps
 from app.backend.config import get_settings
+from app.backend.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Agent 缓存：config hash 不变时复用实例，避免每次重新注册 tools/dynamic_prompt
 _cached_agent: Agent[CareerOSDeps, str] | None = None
@@ -87,11 +87,16 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             "2. 提供学习路径和职业发展建议\n"
             "3. 追踪成长里程碑\n"
             "\n\n"
-            "## 用户画像规则\n"
-            "用户画像（学校、专业、年级、技能、目标）已自动加载到上下文中的「用户信息」部分。\n"
-            "- 【不要】主动调用 get_profile 工具，画像已在上下文中\n"
-            "- 当用户提到个人信息（学校、专业、年级、目标方向等）时，【必须】调用 memory_save 工具保存\n"
-            "- 保存后告诉用户「已记录你的信息」，不要说「已同步」而不实际调用工具\n"
+            "## 记忆保存规则（重要！）\n"
+            "用户画像已自动加载到上下文中。当用户表达任何与职业发展相关的信息时，【必须立即】调用工具保存：\n"
+            "- 用户说「我想做XX/对XX感兴趣」→ memory_save('goals', ...)\n"
+            "- 用户说「我会XX/用过XX」→ memory_save('skills', ...)\n"
+            "- 用户分享经历（项目/实习/比赛）→ memory_save('experiences', ...)\n"
+            "- 用户纠正你或说「记住了吗」→ memory_save('preferences', ...)\n"
+            "- 用户表达决策/焦虑/状态 → memory_save(...)\n"
+            "- 用户说学校/专业/年级 → update_profile(...)\n"
+            "- 【不要】主动调用 get_profile，画像已在上下文中\n"
+            "保存后一句话告知（如「已记录」），不要长篇确认。\n"
             "\n\n"
             "## 回复风格\n"
             "- 使用中文\n"
@@ -123,12 +128,13 @@ def create_agent() -> Agent[CareerOSDeps, str]:
         db = ctx.deps.db
         parts = []
 
-        # ── 结构化画像 + 语义召回 ──────────────────────
+        # ── 结构化画像 + 语义召回（Prefetch：缓存到 deps，tool call 复用）──
         from app.backend.services.careeros_memory import get_memory
 
         memory = get_memory()
         context = await memory.build_context(ctx.deps.user_id, user_input=ctx.deps.current_user_input)
         if context.strip():
+            ctx.deps.build_context_cache = context  # 缓存，供 get_profile 等 tool 复用
             parts.append(context)
 
         # ── 对话摘要（超过 30 条消息后由后台生成）──────────────
@@ -169,7 +175,7 @@ def create_agent() -> Agent[CareerOSDeps, str]:
             return "\n\n".join(parts)
         return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 memory_update 保存。"
 
-    logger.info("PydanticAI Agent created with model: %s", model.model_name)
+    logger.info("PydanticAI Agent created", model=model.model_name)
     return agent
 
 
