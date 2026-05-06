@@ -40,9 +40,9 @@ def _create_model() -> OpenAIChatModel:
             "未配置 LLM API Key。请在设置页面配置 API Key，或在 .env 文件中设置 DASHSCOPE_API_KEY 或 LLM_API_KEY。"
         )
 
-    # DeepSeek OpenAI 兼容端点
+    # DeepSeek OpenAI 兼容端点（PydanticAI OpenAIProvider 需要 /v1 前缀）
     if provider == "deepseek" and not base_url:
-        base_url = "https://api.deepseek.com"
+        base_url = "https://api.deepseek.com/v1"
 
     # DashScope OpenAI 兼容端点
     if provider == "dashscope" and not base_url:
