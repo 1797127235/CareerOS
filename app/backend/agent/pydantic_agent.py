@@ -40,6 +40,22 @@ def _create_model() -> OpenAIChatModel:
             "未配置 LLM API Key。请在设置页面配置 API Key，或在 .env 文件中设置 DASHSCOPE_API_KEY 或 LLM_API_KEY。"
         )
 
+    # DeepSeek OpenAI 兼容端点
+    if provider == "deepseek" and not base_url:
+        base_url = "https://api.deepseek.com"
+
+    # DashScope OpenAI 兼容端点
+    if provider == "dashscope" and not base_url:
+        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    if not base_url:
+        raise ValueError(
+            f"未配置 LLM Base URL。请在设置页面配置 Base URL，"
+            f"或在 .env 文件中设置 LLM_BASE_URL（当前 provider: {provider}）。"
+        )
+
+    logger.info("创建模型", provider=provider, model=model_name, base_url=base_url, has_key=bool(api_key))
+
     # DashScope OpenAI 兼容端点
     if provider == "dashscope" and not base_url:
         base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
