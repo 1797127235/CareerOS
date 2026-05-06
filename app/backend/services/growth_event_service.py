@@ -137,7 +137,7 @@ async def mark_projected_md(db: AsyncSession, event_id: str) -> None:
     result = await db.execute(select(GrowthEvent).where(GrowthEvent.id == event_id))
     event = result.scalar_one_or_none()
     if event:
-        event.projected_md_at = datetime.utcnow()
+        event.projected_md_at = datetime.now(datetime.UTC)
         await db.flush()
     else:
         logger.warning("Event not found for projection marking (md): %s", event_id)
@@ -147,7 +147,7 @@ async def mark_projected_cognee(db: AsyncSession, event_id: str) -> None:
     result = await db.execute(select(GrowthEvent).where(GrowthEvent.id == event_id))
     event = result.scalar_one_or_none()
     if event:
-        event.projected_cognee_at = datetime.utcnow()
+        event.projected_cognee_at = datetime.now(datetime.UTC)
         await db.flush()
     else:
         logger.warning("Event not found for projection marking (cognee): %s", event_id)

@@ -112,7 +112,7 @@ async def rebuild_from_sqlite(user_id: str) -> bool:
                     "created_at": event.created_at.isoformat() if event.created_at else None,
                 }
                 await cognee.remember(content, metadata=_cognee_metadata(metadata))
-                event.projected_cognee_at = datetime.utcnow()
+                event.projected_cognee_at = datetime.now(datetime.UTC)
 
             await db.commit()
 

@@ -31,10 +31,6 @@ def memory_dir(user_id: str) -> Path:
     return _BASE_MEMORY_DIR / user_id
 
 
-def _memory_dir(user_id: str) -> Path:
-    return memory_dir(user_id)
-
-
 def ensure_memory_dirs(user_id: str) -> None:
     """若不存在则创建记忆目录（含父路径）。"""
     memory_dir(user_id).mkdir(parents=True, exist_ok=True)
@@ -81,7 +77,7 @@ def extract_profile_fields(md_text: str) -> dict:
 
 def read_memory(user_id: str) -> str:
     """读取核心记忆文件；不存在则返回空字符串。"""
-    memory_file = _memory_dir(user_id) / "memory.md"
+    memory_file = memory_dir(user_id) / "memory.md"
     if not memory_file.exists():
         return ""
     return memory_file.read_text(encoding="utf-8")
@@ -90,12 +86,12 @@ def read_memory(user_id: str) -> str:
 def write_memory(user_id: str, content: str) -> None:
     """写入核心记忆文件（UTF-8）。"""
     ensure_memory_dirs(user_id)
-    (_memory_dir(user_id) / "memory.md").write_text(content, encoding="utf-8")
+    (memory_dir(user_id) / "memory.md").write_text(content, encoding="utf-8")
 
 
 def read_skills(user_id: str) -> str:
     """读取技能记忆文件；不存在则返回空字符串。"""
-    skills_file = _memory_dir(user_id) / "skills.md"
+    skills_file = memory_dir(user_id) / "skills.md"
     if not skills_file.exists():
         return ""
     return skills_file.read_text(encoding="utf-8")
@@ -104,12 +100,12 @@ def read_skills(user_id: str) -> str:
 def write_skills(user_id: str, content: str) -> None:
     """写入技能记忆文件（UTF-8）。"""
     ensure_memory_dirs(user_id)
-    (_memory_dir(user_id) / "skills.md").write_text(content, encoding="utf-8")
+    (memory_dir(user_id) / "skills.md").write_text(content, encoding="utf-8")
 
 
 def read_experiences(user_id: str) -> str:
     """读取经历记忆文件；不存在则返回空字符串。"""
-    exp_file = _memory_dir(user_id) / "experiences.md"
+    exp_file = memory_dir(user_id) / "experiences.md"
     if not exp_file.exists():
         return ""
     return exp_file.read_text(encoding="utf-8")
@@ -118,7 +114,7 @@ def read_experiences(user_id: str) -> str:
 def write_experiences(user_id: str, content: str) -> None:
     """写入经历记忆文件（UTF-8）。"""
     ensure_memory_dirs(user_id)
-    (_memory_dir(user_id) / "experiences.md").write_text(content, encoding="utf-8")
+    (memory_dir(user_id) / "experiences.md").write_text(content, encoding="utf-8")
 
 
 def search_memory(user_id: str, query: str) -> list[dict]:
@@ -200,9 +196,9 @@ def get_memory_usage(user_id: str, name: str) -> dict:
 def initialize_memory(user_id: str) -> None:
     """首次启动时若缺省则写入三份记忆的默认 Markdown 模板。"""
     ensure_memory_dirs(user_id)
-    if not (_memory_dir(user_id) / "memory.md").exists():
+    if not (memory_dir(user_id) / "memory.md").exists():
         write_memory(user_id, _default_memory_template())
-    if not (_memory_dir(user_id) / "skills.md").exists():
+    if not (memory_dir(user_id) / "skills.md").exists():
         write_skills(user_id, _default_skills_template())
-    if not (_memory_dir(user_id) / "experiences.md").exists():
+    if not (memory_dir(user_id) / "experiences.md").exists():
         write_experiences(user_id, _default_experiences_template())

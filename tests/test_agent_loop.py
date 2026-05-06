@@ -42,13 +42,12 @@ def test_create_agent():
     assert agent._deps_type == CareerOSDeps
 
 
-def test_get_agent_creates_new_instance():
-    """测试 Agent 每次创建新实例（避免配置过期）"""
+def test_get_agent_config_cache():
+    """测试 Agent 按 config hash 缓存——同配置复用，避免重复注册开销。"""
     agent1 = get_agent()
     agent2 = get_agent()
-    # 每次调用都创建新实例，确保配置是最新的
-    assert agent1 is not agent2
-    # 但两个实例的类型相同
+    # 配置不变时应复用同一实例
+    assert agent1 is agent2
     assert isinstance(agent1, type(agent2))
 
 

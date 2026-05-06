@@ -22,8 +22,17 @@ logger = logging.getLogger(__name__)
 _SUMMARY_WINDOW = 20
 
 # 按 conversation_id 隔离的轻量锁，防止并发触发摘要时数据竞争
-# 最小可用版本：只增不减，生产环境需加 LRU 或 TTL 清理（<100 对话无影响）
+# 上限 128 个对话锁——插入时校验，超限则清理已完成（unlocked）的锁
+_MAX_SUMMARY_LOCKS = 128
 _summary_locks: dict[str, asyncio.Lock] = {}
+
+
+def _prune_summary_locks() -> None:
+    """清理已完成（未持有）的摘要锁，释放内存。"""
+    stale = [cid for cid, lock in _summary_locks.items() if not lock.locked()]
+    for cid in stale:
+        del _summary_locks[cid]
+
 
 _SUMMARIZE_PROMPT = """根据以下对话记录更新摘要。只保留：用户背景变化、重要结论和决策、未完成的待办。丢弃闲聊和中间推理。100 字以内，中文。无关紧要则输出"（无重要内容）"
 
@@ -218,6 +227,8 @@ def _build_summary_prompt(previous: str, old_text: str) -> str:
 
 async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
     """将窗口外的旧消息压缩为摘要，写入 Conversation.summary。"""
+    if len(_summary_locks) >= _MAX_SUMMARY_LOCKS:
+        _prune_summary_locks()
     lock = _summary_locks.setdefault(conv.conversation_id, asyncio.Lock())
     async with lock:
         await db.refresh(conv)

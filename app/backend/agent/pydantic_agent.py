@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from pydantic_ai import Agent
@@ -11,6 +12,10 @@ from app.backend.agent.deps import CareerOSDeps
 from app.backend.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Agent 缓存：config hash 不变时复用实例，避免每次重新注册 tools/dynamic_prompt
+_cached_agent: Agent[CareerOSDeps, str] | None = None
+_cached_config_hash: str = ""
 
 
 def _create_model() -> OpenAIChatModel:
@@ -208,9 +213,19 @@ def create_agent() -> Agent[CareerOSDeps, str]:
     return agent
 
 
+def _config_fingerprint() -> str:
+    """计算 LLM 配置指纹，用于判断是否需要重建 Agent。"""
+    s = get_settings()
+    raw = f"{s.llm_provider}|{s.llm_model}|{s.llm_api_key or s.dashscope_api_key}|{s.llm_base_url}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def get_agent() -> Agent[CareerOSDeps, str]:
-    """获取 Agent 实例（每次创建新实例，避免配置过期）
-    注意：不使用单例模式，因为用户可能在运行时更改 LLM 配置。
-    Agent 创建是轻量级操作，不影响性能。
-    """
-    return create_agent()
+    """获取 Agent 实例（config hash 不变时复用缓存，减少重复注册开销）。"""
+    global _cached_agent, _cached_config_hash
+    fp = _config_fingerprint()
+    if _cached_agent is not None and _cached_config_hash == fp:
+        return _cached_agent
+    _cached_agent = create_agent()
+    _cached_config_hash = fp
+    return _cached_agent

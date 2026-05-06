@@ -58,7 +58,7 @@ async def project_new_events(user_id: str, since: datetime | None = None) -> int
             success_count = 0
             for event in events:
                 if await project_event(event):
-                    event.projected_cognee_at = datetime.utcnow()
+                    event.projected_cognee_at = datetime.now(datetime.UTC)
                     success_count += 1
             await db.commit()
             return success_count
@@ -77,7 +77,7 @@ async def project_event_ids(event_ids: list[str]) -> int:
             success_count = 0
             for event in events:
                 if await project_event(event):
-                    event.projected_cognee_at = datetime.utcnow()
+                    event.projected_cognee_at = datetime.now(datetime.UTC)
                     success_count += 1
             await db.commit()
             return success_count

@@ -403,7 +403,7 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
             shutil.rmtree(entities_dir, ignore_errors=True)
             logger.info("Removed legacy entities directory")
 
-        now = datetime.utcnow()
+        now = datetime.now(datetime.UTC)
         for event in events:
             event.projected_md_at = now
         await db.flush()
