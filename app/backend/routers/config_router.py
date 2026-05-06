@@ -22,8 +22,8 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
         "embedding_models": ["text-embedding-3-small", "text-embedding-3-large"],
     },
     "deepseek": {
-        "base_url": "https://api.deepseek.com/v1",
-        "chat_models": ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+        "base_url": "https://api.deepseek.com",
+        "chat_models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
         "embedding_models": [],
     },
     "anthropic": {

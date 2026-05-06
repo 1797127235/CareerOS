@@ -21,8 +21,8 @@ const PROVIDER_CONFIG: Record<
   },
   deepseek: {
     name: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    models: ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    baseUrl: "https://api.deepseek.com",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
     embeddingModels: [],
   },
   anthropic: {

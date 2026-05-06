@@ -46,7 +46,7 @@ def _create_model() -> OpenAIChatModel:
 
     # DeepSeek OpenAI 兼容端点
     if provider == "deepseek" and not base_url:
-        base_url = "https://api.deepseek.com/v1"
+        base_url = "https://api.deepseek.com"
 
     if not base_url:
         raise ValueError(
