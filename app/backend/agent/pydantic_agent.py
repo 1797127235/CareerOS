@@ -41,8 +41,11 @@ def _create_model() -> OpenAIChatModel:
         )
 
     # DeepSeek OpenAI 兼容端点（PydanticAI OpenAIProvider 需要 /v1 前缀）
-    if provider == "deepseek" and not base_url:
-        base_url = "https://api.deepseek.com/v1"
+    if provider == "deepseek":
+        if not base_url:
+            base_url = "https://api.deepseek.com/v1"
+        elif not base_url.rstrip("/").endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
 
     # DashScope OpenAI 兼容端点
     if provider == "dashscope" and not base_url:
