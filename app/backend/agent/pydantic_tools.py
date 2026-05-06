@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic_ai import Agent, RunContext
 
-from app.backend.agent.deps import CareerOSDeps
+from app.backend.agent.deps import LumenDeps
 from app.backend.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -23,10 +23,10 @@ _EVENT_TYPE_MAP: dict[str, str] = {
 }
 
 
-def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
+def register_tools(agent: Agent[LumenDeps, str]) -> None:
     @agent.tool
     async def memory_search(
-        ctx: RunContext[CareerOSDeps],
+        ctx: RunContext[LumenDeps],
         query: str,
         files: list[str] | None = None,
     ) -> str:
@@ -36,7 +36,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         if not query or not query.strip():
             return "请提供搜索关键词。"
 
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         memory = get_memory()
         uid = ctx.deps.user_id
@@ -64,7 +64,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
 
     @agent.tool
     async def memory_save(
-        ctx: RunContext[CareerOSDeps],
+        ctx: RunContext[LumenDeps],
         entity_type: str,
         section: str,
         content: str,
@@ -100,7 +100,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
             KeyValuePayload,
             SkillPayload,
         )
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         # 按 entity_type 构建正确的 payload schema
         if entity_type == "skills":
@@ -131,7 +131,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         return f"{entity_type}/{section} 内容未变化，跳过"
 
     @agent.tool
-    async def get_profile(ctx: RunContext[CareerOSDeps]) -> str:
+    async def get_profile(ctx: RunContext[LumenDeps]) -> str:
         """获取用户完整画像（通常无需主动调用，画像已在 system prompt 中）。"""
         logger.info("Tool call: get_profile", user_id=ctx.deps.user_id)
 
@@ -139,7 +139,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         if ctx.deps.build_context_cache.strip():
             return ctx.deps.build_context_cache
 
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         memory = get_memory()
         context = await memory.build_context(ctx.deps.user_id)
@@ -149,7 +149,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
 
     @agent.tool
     async def update_profile(
-        ctx: RunContext[CareerOSDeps],
+        ctx: RunContext[LumenDeps],
         school_name: str | None = None,
         major: str | None = None,
         grade: str | None = None,
@@ -213,7 +213,7 @@ def register_tools(agent: Agent[CareerOSDeps, str]) -> None:
         # Agent 工具主动写入，不依赖后台提取器
 
         from app.backend.schemas.memory_events import ProfilePayload
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         # 校验：只保留 ProfilePayload 已知字段，丢弃未知 key；类型错则报错
         allowed_keys = set(ProfilePayload.model_fields.keys())

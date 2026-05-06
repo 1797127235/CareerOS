@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass
-class CareerOSDeps:
-    """CareerOS Agent 依赖注入类型
+class LumenDeps:
+    """Lumen Agent 依赖注入类型
 
     用于 PydanticAI Agent 的 RunContext，提供：
     - user_id: 用户 ID

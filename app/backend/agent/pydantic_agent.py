@@ -1,4 +1,4 @@
-"""PydanticAI Agent 定义 — CareerOS 职业规划助手"""
+"""PydanticAI Agent 定义 — Lumen"""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ import hashlib
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 
-from app.backend.agent.deps import CareerOSDeps
+from app.backend.agent.deps import LumenDeps
 from app.backend.config import get_settings
 from app.backend.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # Agent 缓存：config hash 不变时复用实例，避免每次重新注册 tools/dynamic_prompt
-_cached_agent: Agent[CareerOSDeps, str] | None = None
+_cached_agent: Agent[LumenDeps, str] | None = None
 _cached_config_hash: str = ""
 
 
@@ -82,8 +82,8 @@ def _create_model() -> OpenAIChatModel:
     )
 
 
-def create_agent() -> Agent[CareerOSDeps, str]:
-    """创建 CareerOS Agent 实例
+def create_agent() -> Agent[LumenDeps, str]:
+    """创建 Lumen Agent 实例
 
     Returns:
         配置好的 PydanticAI Agent
@@ -96,13 +96,17 @@ def create_agent() -> Agent[CareerOSDeps, str]:
 
     agent = Agent(
         model=model,
-        deps_type=CareerOSDeps,
+        deps_type=LumenDeps,
         output_type=str,
         system_prompt=(
-            "你是 CareerOS。规则：用户提到职业目标/技能/经历/学校时必须调用工具保存。\n"
+            "你是「Lumen」，用户的 AI 伴侣。性格：深谋远虑但平易近人，说话像一个真正认识你的朋友，"
+            "不是客服，不奉承，有时候会说实话，包括用户不想听的。\n\n"
+            "规则：用户提到目标/技能/经历/学校/偏好/决定时必须调用工具保存。\n"
             "目标→memory_save('goals',方向,动机) | 技能→memory_save('skills',名称,程度)\n"
             "经历→memory_save('experiences',标题,描述) | 学校→update_profile() | 偏好→memory_save('preferences',名,内容)\n"
-            "先保存再回答，一句话告知，不要只回「已记录」。"
+            "先保存再回答，一句话告知，不要只回「已记录」。\n\n"
+            "开场白：简短自然，不罗列功能，不问「有什么可以帮您」。"
+            "示例：「我是 Lumen。你在哪个阶段，就从哪里说起。」"
         ),
         retries=2,
         end_strategy="graceful",  # 流式 output_type=str：同时返回文本+工具调用时仍需执行工具
@@ -114,7 +118,7 @@ def create_agent() -> Agent[CareerOSDeps, str]:
     # 动态系统提示词：记忆上下文 + 对话历史（放在 system prompt 中而非用户消息）
     # 语义上正确：上下文是系统级背景信息，模型能区分「指令+背景」和「用户请求」
     @agent.system_prompt
-    async def dynamic_prompt(ctx: RunContext[CareerOSDeps]) -> str:
+    async def dynamic_prompt(ctx: RunContext[LumenDeps]) -> str:
         from sqlalchemy import select
 
         from app.backend.models.conversation import Conversation, Message
@@ -123,7 +127,7 @@ def create_agent() -> Agent[CareerOSDeps, str]:
         parts = []
 
         # ── 结构化画像 + 语义召回 ──
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         memory = get_memory()
         context = await memory.build_context(ctx.deps.user_id, user_input=ctx.deps.current_user_input)
@@ -173,7 +177,7 @@ def _config_fingerprint() -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def get_agent() -> Agent[CareerOSDeps, str]:
+def get_agent() -> Agent[LumenDeps, str]:
     """获取 Agent 实例（config hash 不变时复用缓存，减少重复注册开销）。"""
     global _cached_agent, _cached_config_hash
     fp = _config_fingerprint()

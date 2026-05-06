@@ -1,4 +1,4 @@
-"""CareerOS Desktop — PyWebView 桌面启动器"""
+"""Lumen Desktop — PyWebView 桌面启动器"""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def main():
 
     # 3. 打开桌面窗口
     webview.create_window(
-        "CareerOS · 码路领航",
+        "Lumen",
         url,
         width=1100,
         height=750,

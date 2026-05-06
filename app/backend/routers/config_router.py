@@ -1,4 +1,4 @@
-"""User config routes backed by ~/.careeros/config.json."""
+"""User config routes backed by ~/.lumen/config.json."""
 
 from __future__ import annotations
 

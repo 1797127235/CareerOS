@@ -1,7 +1,7 @@
 [project]
-name = "career-os"
+name = "lumen"
 version = "0.1.0"
-description = "码路领航 — AI 职业规划智能体"
+description = "Lumen — 一个真正认识你的 AI 伴侣"
 requires-python = ">=3.11"
 
 [tool.ruff]

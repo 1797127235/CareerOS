@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.agent.deps import CareerOSDeps
+from app.backend.agent.deps import LumenDeps
 from app.backend.logging_config import get_logger
 from app.backend.models.conversation import Conversation, Message
 
@@ -76,11 +76,11 @@ async def _background_memory_review(
         from app.backend.db.base import get_async_session_maker
 
         async with get_async_session_maker()() as db:
-            from app.backend.agent.deps import CareerOSDeps
+            from app.backend.agent.deps import LumenDeps
             from app.backend.agent.pydantic_agent import get_agent
 
             agent = get_agent()
-            deps = CareerOSDeps(
+            deps = LumenDeps(
                 user_id=user_id,
                 db=db,
                 conversation_id=conversation_id,
@@ -96,7 +96,7 @@ async def _background_memory_review(
 
             # 如果审查 Agent 调了工具 → 触发投影
             if deps.pending_event_ids:
-                from app.backend.services.careeros_memory import get_memory
+                from app.backend.services.lumen_memory import get_memory
 
                 await get_memory().sync_projections(user_id, deps.pending_event_ids)
                 logger.info(
@@ -172,7 +172,7 @@ async def stream_chat(
         from app.backend.agent.pydantic_agent import get_agent
 
         agent = get_agent()
-        deps = CareerOSDeps(
+        deps = LumenDeps(
             user_id=user_id,
             db=db,
             conversation_id=conv.conversation_id,
@@ -212,7 +212,7 @@ async def stream_chat(
                 # Agent 工具创建了事件 → commit 后触发投影
                 if deps.pending_event_ids:
                     try:
-                        from app.backend.services.careeros_memory import get_memory
+                        from app.backend.services.lumen_memory import get_memory
 
                         await get_memory().sync_projections(user_id, deps.pending_event_ids)
                     except Exception as e:

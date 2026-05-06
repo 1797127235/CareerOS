@@ -1,8 +1,8 @@
-# CareerOS
+# Lumen
 
 <p align="center">
-  <b>面向中国 CS 学生的自托管 AI 职业规划助手</b><br>
-  <i>从大一陪伴到毕业，越用越懂你</i>
+  <b>一个真正认识你的 AI 伴侣</b><br>
+  <i>伴你从学生到未来，深谋远虑，始终平易近人</i>
 </p>
 
 <p align="center">
@@ -17,11 +17,11 @@
 
 ## 这是什么
 
-一个帮计算机专业学生做职业规划的 AI Agent。不是"拿了 JD 帮我匹简历"，而是"我不知道该学什么、该投什么"。
+一个单用户 AI 伴侣系统，持续积累对你的了解——你的经历、目标、困惑、决定——随时间真正认识你这个人。
 
-**目标用户**：普通本科/211 的 CS 在校生，大一迷茫或大三找实习碰壁。
+**目标用户**：处于学生到职场初期，面对方向选择、个人成长、人生规划的人。
 
-**核心价值**：数据在本地、自己部署、用四年——不是一次性工具，是一个越用越懂你的系统。
+**核心价值**：你不需要每次重新解释自己。数据在本地，不依赖云端，越用越懂你。
 
 **技术栈**：FastAPI + SQLAlchemy + PydanticAI + LiteLLM + React + Vite + Tailwind
 
@@ -44,8 +44,8 @@
 ### 方式一：Docker（推荐）
 
 ```bash
-git clone https://github.com/1797127235/CareerOS.git
-cd CareerOS
+git clone https://github.com/1797127235/Lumen.git
+cd Lumen
 docker compose up -d
 ```
 
@@ -76,7 +76,7 @@ cp .env.example .env
 ## 项目结构
 
 ```
-career-os/
+lumen/
 ├── app/backend/
 │   ├── main.py              # FastAPI 入口，lifespan 中自动 create_all
 │   ├── config.py            # pydantic-settings，从根目录 .env 加载
@@ -93,7 +93,7 @@ career-os/
 │   │   ├── pydantic_agent.py  # PydanticAI Agent 定义 + 动态系统提示词
 │   │   ├── pydantic_tools.py  # Agent 工具（memory_search/save, update_profile）
 │   │   ├── llm_router.py     # LLM 路由（多 Provider），流式+非流式
-│   │   └── deps.py           # Agent 依赖注入（CareerOSDeps）
+│   │   └── deps.py           # Agent 依赖注入（LumenDeps）
 │   ├── routers/
 │   │   ├── chat.py           # POST /api/chat (SSE), GET /api/chat/history
 │   │   ├── profile.py        # GET/PATCH/DELETE /api/profile/me, POST /api/profile/resume
@@ -108,7 +108,7 @@ career-os/
 │       ├── memory_service.py # .md 文件记忆层
 │       ├── growth_event_service.py # GrowthEvent CRUD + 去重
 │       ├── md_projector.py   # SQLite → .md 投影器
-│       └── careeros_memory.py # 统一记忆门面（FTS5 + Cognee + .md）
+│       └── lumen_memory.py # 统一记忆门面（FTS5 + Cognee + .md）
 ├── app/frontend/
 │   └── src/
 │       ├── pages/
@@ -131,7 +131,7 @@ career-os/
 
 ## 数据架构
 
-CareerOS 使用**事件驱动的记忆系统**：
+Lumen 使用**事件驱动的记忆系统**：
 
 ```
 写入路径:
@@ -156,10 +156,10 @@ Agent 工具（memory_save / update_profile）
 | L1 | conversation messages | 短期上下文（最近 20 条 + 滚动摘要） |
 | L2 | growth_events → .md | 结构化画像 + FTS5 全文搜索 |
 
-所有数据存储在 `~/.careeros/`：
+所有数据存储在 `~/.lumen/`：
 ```
-~/.careeros/
-├── career_os.db      # SQLite（事件、对话、技能、FTS5 索引）
+~/.lumen/
+├── lumen.db      # SQLite（事件、对话、技能、FTS5 索引）
 ├── memory/           # .md 记忆文件
 │   ├── memory.md     # 核心画像
 │   ├── skills.md     # 技能
@@ -187,7 +187,7 @@ Agent 工具（memory_save / update_profile）
 
 ## Agent 系统
 
-CareerOS 使用 PydanticAI 实现的 Agent ReAct Loop：
+Lumen 使用 PydanticAI 实现的 Agent ReAct Loop：
 
 ```
 用户消息 → POST /api/chat
@@ -302,7 +302,7 @@ git push origin feat/your-feature
 | 变量 | 必填 | 说明 |
 |------|------|------|
 | `DASHSCOPE_API_KEY` | ✅ | DashScope API Key（也可在设置页填写） |
-| `DATABASE_URL` | ❌ | 默认 `~/.careeros/career_os.db` |
+| `DATABASE_URL` | ❌ | 默认 `~/.lumen/lumen.db` |
 | `DEBUG` | ❌ | `true`（开发）/ `false`（Docker 生产） |
 
 完整配置见 `.env.example`。

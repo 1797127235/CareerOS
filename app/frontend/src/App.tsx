@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { ChatSessionProvider } from './lib/chatSession'
 
-const FEEDBACK_URL = 'https://github.com/1797127235/CareerOS/issues'
+const FEEDBACK_URL = 'https://github.com/1797127235/Lumen/issues'
 
 function App() {
   return (
@@ -13,7 +13,7 @@ function App() {
             end
             className="flex items-baseline gap-xs text-text hover:opacity-100"
           >
-            <span className="text-xl font-han text-ink">CareerOS</span>
+            <span className="text-xl font-han text-ink">Lumen</span>
           </NavLink>
 
           <nav className="flex items-center gap-lg text-base">

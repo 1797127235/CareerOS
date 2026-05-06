@@ -1,4 +1,4 @@
-"""CareerOS 记忆层统一门面。
+"""Lumen 记忆层统一门面。
 
 所有记忆读写经此类收敛，调用方不碰后端编排。
 
@@ -55,7 +55,7 @@ class MemoryItem(BaseModel):
     categories: list[str] = Field(default_factory=list)
 
 
-class CareerOSMemory:
+class LumenMemory:
     """记忆层统一门面 — 单例，无状态。"""
 
     # Frozen Snapshot 缓存：user_id → (md_content_hash, static_context)
@@ -431,11 +431,11 @@ class CareerOSMemory:
 
 # ── 模块级单例 ──
 
-_memory: CareerOSMemory | None = None
+_memory: LumenMemory | None = None
 
 
-def get_memory() -> CareerOSMemory:
+def get_memory() -> LumenMemory:
     global _memory
     if _memory is None:
-        _memory = CareerOSMemory()
+        _memory = LumenMemory()
     return _memory

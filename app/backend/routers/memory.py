@@ -178,7 +178,7 @@ async def rebuild_memory(user_id: str = Query("demo_user")) -> dict:
     _validate_user_id(user_id)
 
     try:
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         result = await get_memory().rebuild(user_id)
         md_ok = result["md_success"]
@@ -209,7 +209,7 @@ async def search_memories(
     _validate_user_id(user_id)
 
     try:
-        from app.backend.services.careeros_memory import get_memory as _get_mem
+        from app.backend.services.lumen_memory import get_memory as _get_mem
 
         memory = _get_mem()
         items = await memory.recall(user_id, query, limit=limit)
@@ -232,7 +232,7 @@ async def compensate_cognee(user_id: str = Query("demo_user")) -> dict:
     """补偿扫描：重试 Cognee 投影失败的事件。"""
     _validate_user_id(user_id)
     try:
-        from app.backend.services.careeros_memory import get_memory
+        from app.backend.services.lumen_memory import get_memory
 
         fixed = await get_memory().compensate_cognee(user_id)
         return {"user_id": user_id, "compensated": fixed}

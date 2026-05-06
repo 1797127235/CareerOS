@@ -1,4 +1,4 @@
-"""CareerOS 后端入口"""
+"""Lumen 后端入口"""
 
 from contextlib import asynccontextmanager
 
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 
     yield
     # 关闭时取消未完成的 Cognee 投影任务
-    from app.backend.services.careeros_memory import cancel_background_tasks
+    from app.backend.services.lumen_memory import cancel_background_tasks
 
     cancel_background_tasks()
     await engine.dispose()
@@ -117,8 +117,8 @@ async def _migrate_sqlite(conn):
 
 
 app = FastAPI(
-    title="CareerOS",
-    description="从大一陪伴到毕业的 AI 职业规划助手",
+    title="Lumen",
+    description="一个真正认识你的 AI 伴侣",
     version="0.2.0",
     lifespan=lifespan,
 )

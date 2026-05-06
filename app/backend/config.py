@@ -1,7 +1,7 @@
 """应用配置 — 环境变量 + config.json 双层配置
 
 优先级: config.json > 环境变量 (.env) > 默认值
-USER_DATA_DIR: ~/.careeros/（用户运行时数据，跨版本持久化）
+USER_DATA_DIR: ~/.lumen/（用户运行时数据，跨版本持久化）
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # ── 目录常量 ────────────────────────────────────────
 
 # 用户运行时数据目录（SQLite / Chroma / config.json）
-USER_DATA_DIR = Path.home() / ".careeros"
+USER_DATA_DIR = Path.home() / ".lumen"
 
 
 def _ensure_user_data_dir() -> None:
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # ── Cognee ──
     # 单实例 / 自托管默认共用一个数据集；多用户同机部署时请为每用户拆分策略另行设计
-    cognee_dataset: str = "career_os"
+    cognee_dataset: str = "lumen"
 
     # ── 应用 ──
     debug: bool = True
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
         # 数据库默认路径：用户数据目录
         if not self.database_url:
             _ensure_user_data_dir()
-            self.database_url = f"sqlite+aiosqlite:///{USER_DATA_DIR}/career_os.db"
+            self.database_url = f"sqlite+aiosqlite:///{USER_DATA_DIR}/lumen.db"
 
 
 _settings: Settings | None = None
@@ -81,7 +81,7 @@ def get_settings() -> Settings:
 
 
 def load_user_config() -> dict[str, Any]:
-    """读取用户运行时配置（~/.careeros/config.json）
+    """读取用户运行时配置（~/.lumen/config.json）
 
     由 lifespan 或 config API 调用，叠加在 env/default 之上。
     Returns 空 dict 表示文件不存在或解析失败。

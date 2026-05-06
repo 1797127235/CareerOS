@@ -9,11 +9,6 @@ import {
 } from '../lib/api'
 import { useChatSession } from '../lib/chatSession'
 
-const EXAMPLES = [
-  '我大三，后端方向，现在准备暑期实习还来得及吗？',
-  '看看我简历里最弱的一项是什么？',
-  '想去字节做后端，我还差多远？',
-]
 
 export default function Chat() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -85,23 +80,8 @@ export default function Chat() {
       <div className="flex flex-1 flex-col gap-xl">
         {messages.length === 0 && !streaming ? (
           <div className="mt-2xl flex flex-col gap-md ink-fade-in">
-            <p className="text-lg text-text">
-              我是码路，帮你看简历、对岗位、理方向。
-            </p>
-            <p className="text-lg text-text">我在等你说第一句。</p>
-            <ul className="mt-md flex flex-col gap-2xs">
-              {EXAMPLES.map((q) => (
-                <li key={q} className="flex items-baseline gap-sm">
-                  <span className="text-text-subtle">路</span>
-                  <button
-                    onClick={() => setDraft(q)}
-                    className="text-left text-base text-text-muted transition-colors hover:text-ink"
-                  >
-                    {q}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <p className="text-lg text-text">我是 Lumen，很高兴认识你。</p>
+            <p className="text-lg text-text">从哪里开始都行。</p>
           </div>
         ) : null}
 
@@ -321,9 +301,9 @@ function pad(n: number): string {
 
 const PLACEHOLDERS = [
   '说说你最近的情况...',
-  '贴一段 JD，我帮你诊断匹配度',
-  '想去大厂后端，我还差什么？',
-  '简历怎么改才能更容易过初筛？',
+  '有什么在脑子里转？',
+  '最近在纠结什么？',
+  '想理清楚什么？',
 ]
 
 function InputBox({

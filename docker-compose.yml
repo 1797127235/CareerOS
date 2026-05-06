@@ -1,14 +1,14 @@
 services:
-  career-os:
-    image: ghcr.io/1797127235/career-os:latest
+  lumen:
+    image: ghcr.io/1797127235/lumen:latest
     build: .
-    container_name: career-os
+    container_name: lumen
     ports:
       - "${PORT:-3000}:3000"
     volumes:
-      - career-data:/root/.careeros
+      - lumen-data:/root/.lumen
     restart: unless-stopped
 
 volumes:
-  career-data:
+  lumen-data:
     driver: local

@@ -1,12 +1,13 @@
 @echo off
-chcp 65001 >nul
-title CareerOS Desktop
+title Lumen
 
-echo ==============================
-echo  CareerOS Desktop
-echo ==============================
-echo.
+if not exist app\frontend\dist\index.html (
+    echo Building frontend...
+    pushd app\frontend
+    call npm run build
+    popd
+)
 
-echo Starting CareerOS...
+echo Starting Lumen...
 python desktop.py
 pause

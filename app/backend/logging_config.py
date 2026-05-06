@@ -1,4 +1,4 @@
-"""CareerOS 日志配置 — structlog + stdlib 混合方案
+"""Lumen 日志配置 — structlog + stdlib 混合方案
 
 设计原则：
 1. 开发环境：彩色控制台输出，易读

@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 
 _cognee_status: str = "not_initialized"
 
-# 显式配置 Cognee 存储路径到 ~/.careeros/
-USER_DATA_DIR = Path.home() / ".careeros"
+# 显式配置 Cognee 存储路径到 ~/.lumen/
+USER_DATA_DIR = Path.home() / ".lumen"
 
 
 def _configure_cognee_paths():
-    """配置 Cognee 存储路径到 ~/.careeros/"""
+    """配置 Cognee 存储路径到 ~/.lumen/"""
     os.environ["GRAPH_DATABASE_PROVIDER"] = "kuzu"
     os.environ["GRAPH_DATABASE_PATH"] = str(USER_DATA_DIR / "kuzu")
     os.environ["VECTOR_DATABASE_PROVIDER"] = "lancedb"

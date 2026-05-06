@@ -20,7 +20,7 @@ type ChatSessionValue = {
   startNew: () => void
 }
 
-const CHAT_CONV_STORAGE_KEY = 'career-os:chat-conversation-id'
+const CHAT_CONV_STORAGE_KEY = 'lumen:chat-conversation-id'
 
 const ChatSessionContext = createContext<ChatSessionValue | null>(null)
 
