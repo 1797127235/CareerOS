@@ -23,7 +23,7 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
-        "chat_models": ["deepseek-chat", "deepseek-reasoner"],
+        "chat_models": ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
         "embedding_models": [],
     },
     "anthropic": {
