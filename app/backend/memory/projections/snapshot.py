@@ -51,7 +51,7 @@ async def build_snapshot(user_id: str) -> str:
 
     async with get_async_session_maker()() as db:
         repo = GrowthEventRepository(db)
-        events = await repo.get_all_by_user(user_id)
+        events = await repo.list_by_user(user_id)
 
     if not events:
         result = "【用户画像为空】"

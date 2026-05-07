@@ -79,7 +79,7 @@ export type MessageItem = {
 
 export type SSEEvent =
   | { type: "token"; content: string; conversation_id: string }
-  | { type: "done"; conversation_id: string }
+  | { type: "done"; conversation_id: string; usage?: { input: number; output: number } }
   | { type: "error"; message: string };
 
 function statusToZh(status: number): string {
@@ -190,7 +190,7 @@ export function deleteConversation(conversation_id: string): Promise<{ deleted: 
 
 export type ChatStreamHandlers = {
   onToken: (delta: string, conversationId: string) => void;
-  onDone: (conversationId: string) => void;
+  onDone: (conversationId: string, usage?: { input: number; output: number }) => void;
   onError: (message: string) => void;
   signal?: AbortSignal;
 };
@@ -250,7 +250,7 @@ export async function chatStream(
         if (evt.type === "token") {
           h.onToken(evt.content, evt.conversation_id);
         } else if (evt.type === "done") {
-          h.onDone(evt.conversation_id);
+          h.onDone(evt.conversation_id, evt.usage);
         } else if (evt.type === "error") {
           h.onError(evt.message);
         }

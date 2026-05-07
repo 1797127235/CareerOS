@@ -8,7 +8,11 @@ import {
 } from 'react'
 import { chatStream, getConversation } from './api'
 
-export type ChatMessage = { role: 'user' | 'assistant'; content: string }
+export type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  usage?: { input: number; output: number }
+}
 
 type ChatSessionValue = {
   messages: ChatMessage[]
@@ -95,12 +99,22 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
           return next
         })
       },
-      onDone: (cid) => {
+      onDone: (cid, usage) => {
         if (completed) return
         completed = true
         setConversationId(cid)
         setStreaming(false)
         abortRef.current = null
+        if (usage) {
+          setMessages((prev) => {
+            const next = prev.slice()
+            const last = next[next.length - 1]
+            if (last && last.role === 'assistant') {
+              next[next.length - 1] = { ...last, usage }
+            }
+            return next
+          })
+        }
       },
       onError: (message) => {
         if (completed) return

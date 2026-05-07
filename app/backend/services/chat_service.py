@@ -180,6 +180,7 @@ async def stream_chat(
         )
 
         full_content = ""
+        usage_data: dict | None = None
         try:
             async with agent.run_stream(
                 user_input,
@@ -189,6 +190,15 @@ async def stream_chat(
                 async for text in response.stream_text(delta=True):
                     full_content += text
                     yield _sse_token(text, conv.conversation_id)
+
+                try:
+                    u = response.usage()
+                    usage_data = {
+                        "input": u.request_tokens or 0,
+                        "output": u.response_tokens or 0,
+                    }
+                except Exception:
+                    pass
 
         finally:
             # 无论正常完成还是客户端断开，都保存已生成的内容
@@ -241,7 +251,7 @@ async def stream_chat(
         task = asyncio.create_task(_summarize_bg(conv.conversation_id))
         task.add_done_callback(_log_task_error)
 
-    yield _sse_done(conv.conversation_id)
+    yield _sse_done(conv.conversation_id, usage_data)
 
 
 async def _summarize_bg(conversation_id: str) -> None:
@@ -356,5 +366,8 @@ def _sse_error(message: str) -> str:
     return f"data: {json.dumps({'type': 'error', 'message': message}, ensure_ascii=False)}\n\n"
 
 
-def _sse_done(conversation_id: str) -> str:
-    return f"data: {json.dumps({'type': 'done', 'conversation_id': conversation_id}, ensure_ascii=False)}\n\n"
+def _sse_done(conversation_id: str, usage: dict | None = None) -> str:
+    payload: dict = {"type": "done", "conversation_id": conversation_id}
+    if usage:
+        payload["usage"] = usage
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"

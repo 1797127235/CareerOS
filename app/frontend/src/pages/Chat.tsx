@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import * as Dialog from '@radix-ui/react-dialog'
 import ReactMarkdown from 'react-markdown'
-import {
-  deleteConversation,
-  getChatHistory,
-  type ConversationSummary,
-} from '../lib/api'
 import { useChatSession } from '../lib/chatSession'
-
+import { parseThinkSegments } from '../lib/thinkSegments'
 
 export default function Chat() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -20,7 +14,6 @@ export default function Chat() {
     error,
     sendMessage,
     loadConversation,
-    startNew,
   } = useChatSession()
   const endRef = useRef<HTMLDivElement | null>(null)
 
@@ -61,25 +54,10 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-64px)] max-w-[680px] flex-col px-md pt-xl pb-xl">
-      <div className="sticky top-[64px] z-40 -mx-md mb-lg flex justify-end gap-md border-b border-border-soft bg-bg/85 px-md py-sm text-xs text-text-subtle backdrop-blur-md">
-        <button
-          onClick={startNew}
-          className="hover:text-text"
-          aria-label="开启新对话"
-        >
-          + 重新开始
-        </button>
-        <HistoryDrawer
-          onPick={loadConversation}
-          currentId={conversationId}
-          onDeletedCurrent={startNew}
-        />
-      </div>
-
+    <div className="mx-auto flex min-h-screen max-w-[680px] flex-col px-md pt-xl pb-xl">
       <div className="flex flex-1 flex-col gap-xl">
         {messages.length === 0 && !streaming ? (
-          <div className="mt-2xl flex flex-col gap-md ink-fade-in">
+          <div className="flex flex-1 flex-col items-center justify-center gap-md ink-fade-in">
             <p className="text-lg text-text">我是 Lumen，很高兴认识你。</p>
             <p className="text-lg text-text">从哪里开始都行。</p>
           </div>
@@ -91,6 +69,7 @@ export default function Chat() {
               key={index}
               text={message.content}
               streaming={streaming && index === messages.length - 1}
+              usage={message.usage}
             />
           ) : (
             <UserBubble key={index} text={message.content} />
@@ -114,17 +93,46 @@ export default function Chat() {
   )
 }
 
-function AssistantBubble({ text, streaming }: { text: string; streaming: boolean }) {
+function AssistantBubble({
+  text,
+  streaming,
+  usage,
+}: {
+  text: string
+  streaming: boolean
+  usage?: { input: number; output: number }
+}) {
+  const segments = parseThinkSegments(text)
+
   return (
     <div className="ink-fade-in">
       <div className="mb-2xs text-xs text-text-subtle">学长</div>
       <div className="mb-sm h-px w-12 bg-border" />
-      <div className="prose prose-sm max-w-none text-base">
-        <ReactMarkdown>{text}</ReactMarkdown>
-        {streaming && text ? <span className="ink-cursor" /> : null}
-      </div>
+
+      {segments.map((seg, i) =>
+        seg.kind === 'think' ? (
+          <ThinkingCard key={i} content={seg.content} closed={seg.closed} />
+        ) : (
+          <div key={i} className="prose prose-sm max-w-none text-base">
+            <ReactMarkdown>{seg.content}</ReactMarkdown>
+            {streaming && i === segments.length - 1 && seg.content ? (
+              <span className="ink-cursor" />
+            ) : null}
+          </div>
+        ),
+      )}
+
       {streaming && !text ? (
         <span className="text-text-muted ink-cursor">正在写...</span>
+      ) : null}
+
+      {usage && !streaming ? (
+        <div className="mt-xs flex gap-xs text-[11px] text-text-subtle/50">
+          <span>输入 {usage.input}</span>
+          <span>·</span>
+          <span>输出 {usage.output}</span>
+          <span>token</span>
+        </div>
       ) : null}
     </div>
   )
@@ -139,164 +147,6 @@ function UserBubble({ text }: { text: string }) {
       </div>
     </div>
   )
-}
-
-function HistoryDrawer({
-  onPick,
-  currentId,
-  onDeletedCurrent,
-}: {
-  onPick: (id: string) => Promise<void> | void
-  currentId: string | null
-  onDeletedCurrent?: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [items, setItems] = useState<ConversationSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deleteId, setDeleteId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setLoading(true)
-    getChatHistory(20)
-      .then(setItems)
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [open])
-
-  async function confirmDelete(idToDelete?: string) {
-    const id = idToDelete || deleteId
-    if (!id) return
-
-    try {
-      await deleteConversation(id)
-      setItems((prev) => prev.filter((item) => item.conversation_id !== id))
-      if (id === deleteId) setDeleteId(null)
-      if (id === currentId) {
-        onDeletedCurrent?.()
-        setOpen(false)
-      }
-    } catch {
-      alert('删除失败，请重试')
-    }
-  }
-
-  return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <button className="hover:text-text" aria-label="历史会话">
-          翻翻之前
-        </button>
-      </Dialog.Trigger>
-
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-bg/60 backdrop-blur-[2px]" />
-        <Dialog.Content className="fixed top-0 right-0 z-[60] h-screen w-full overflow-y-auto border-l border-border-soft bg-surface p-lg sm:w-[380px]">
-          <div className="mb-lg flex items-center justify-between">
-            <Dialog.Title className="text-lg font-semibold text-ink">
-              之前聊过的
-            </Dialog.Title>
-            <Dialog.Close className="rounded-md p-1.5 text-text-subtle transition-colors hover:bg-surface-elevated hover:text-text">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </Dialog.Close>
-          </div>
-          <Dialog.Description className="sr-only">
-            选择一段对话重新打开
-          </Dialog.Description>
-
-          {loading ? (
-            <div className="mt-md ink-progress" />
-          ) : items.length === 0 ? (
-            <p className="text-sm text-text-muted">还没有聊过。</p>
-          ) : (
-            <ul className="flex flex-col gap-xs">
-              {items.map((item) => (
-                <li key={item.conversation_id}>
-                  <button
-                    onClick={() => {
-                      void onPick(item.conversation_id)
-                      setOpen(false)
-                    }}
-                    className={`group flex w-full items-start justify-between rounded-md px-3 py-2.5 text-left transition-colors hover:bg-surface-elevated ${
-                      currentId === item.conversation_id ? 'bg-surface-elevated/50' : ''
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <svg className="h-4 w-4 flex-shrink-0 text-text-subtle" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.5}
-                            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                          />
-                        </svg>
-                        <span className="truncate text-sm font-medium text-text transition-colors group-hover:text-ink">
-                          {item.title || '未命名'}
-                        </span>
-                      </div>
-                      <div className="mt-1 ml-6 flex items-center gap-1.5 text-xs text-text-subtle">
-                        <time>{formatTime(item.last_message_at)}</time>
-                        <span>·</span>
-                        <span>{item.message_count} 条消息</span>
-                      </div>
-                    </div>
-                    <div
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        if (deleteId === item.conversation_id) {
-                          void confirmDelete(item.conversation_id)
-                        } else {
-                          setDeleteId(item.conversation_id)
-                          setTimeout(() => setDeleteId(null), 3000)
-                        }
-                      }}
-                      className={`mt-0.5 flex-shrink-0 text-xs transition-all ${
-                        deleteId === item.conversation_id
-                          ? 'text-danger opacity-100'
-                          : 'text-text-subtle opacity-0 group-hover:opacity-100 hover:text-danger'
-                      }`}
-                    >
-                      {deleteId === item.conversation_id ? '确定？' : '删掉'}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-function formatTime(iso: string | null): string {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-
-  const now = new Date()
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-
-  if (sameDay) {
-    return `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  }
-
-  return `${date.getMonth() + 1}月${date.getDate()}日`
-}
-
-function pad(n: number): string {
-  return n < 10 ? `0${n}` : String(n)
 }
 
 const PLACEHOLDERS = [
@@ -367,7 +217,7 @@ function InputBox({
 
       <div className="flex items-center justify-between px-3 pt-0 pb-2">
         <span className="select-none text-[11px] text-text-subtle/60">
-          {draft.length > 0 ? `${draft.length} 字` : 'Shift + Enter 换行'}
+           {draft.length > 0 ? `${draft.length} 字` : 'Shift + Enter 换行'}
         </span>
 
         <button
@@ -403,5 +253,49 @@ function InputBox({
         </button>
       </div>
     </div>
+  )
+}
+
+function ThinkingCard({ content, closed }: { content: string; closed: boolean }) {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+
+  const open = userToggled !== null ? userToggled : !closed
+
+  useEffect(() => {
+    const el = detailsRef.current
+    if (el && el.open !== open) el.open = open
+  }, [open])
+
+  return (
+    <details
+      ref={detailsRef}
+      onToggle={(e) => {
+        const next = e.currentTarget.open
+        if (next !== open) setUserToggled(next)
+      }}
+      className="group/think my-sm overflow-hidden rounded-lg border border-border-soft bg-surface/50"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-xs px-sm py-xs text-xs text-text-subtle transition-colors hover:text-text-muted [&::-webkit-details-marker]:hidden">
+        <svg
+          className="h-3 w-3 shrink-0 transition-transform group-open/think:rotate-180"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+        <span>思考过程</span>
+        {!closed && (
+          <span className="ml-xs animate-pulse text-text-subtle">·</span>
+        )}
+      </summary>
+      <div className="border-t border-border-soft px-sm py-xs">
+        <pre className="whitespace-pre-wrap font-mono text-xs text-text-subtle leading-relaxed">
+          {content || '思考中…'}
+        </pre>
+      </div>
+    </details>
   )
 }
