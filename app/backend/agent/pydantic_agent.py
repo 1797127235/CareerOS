@@ -20,7 +20,6 @@ _cached_config_hash: str = ""
 
 def _create_model() -> OpenAIChatModel:
     """创建 LiteLLM 兼容的 OpenAI 模型实例
-
     Raises:
         ValueError: 如果未配置 API Key
     """
@@ -29,8 +28,8 @@ def _create_model() -> OpenAIChatModel:
 
     settings = get_settings()
 
-    provider = settings.llm_provider or "dashscope"
-    model_name = settings.llm_model or "qwen-plus"
+    provider = settings.llm_provider
+    model_name = settings.llm_model
     api_key = settings.llm_api_key or settings.dashscope_api_key
     base_url = settings.llm_base_url
 
@@ -55,20 +54,6 @@ def _create_model() -> OpenAIChatModel:
         )
 
     logger.info("创建模型", provider=provider, model=model_name, base_url=base_url, has_key=bool(api_key))
-
-    # DashScope OpenAI 兼容端点
-    if provider == "dashscope" and not base_url:
-        base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    # DeepSeek OpenAI 兼容端点
-    if provider == "deepseek" and not base_url:
-        base_url = "https://api.deepseek.com"
-
-    if not base_url:
-        raise ValueError(
-            f"未配置 LLM Base URL。请在设置页面配置 Base URL，"
-            f"或在 .env 文件中设置 LLM_BASE_URL（当前 provider: {provider}）。"
-        )
 
     # PydanticAI OpenAI Provider 使用纯模型名（不带 provider 前缀）
     model_id = model_name
@@ -101,12 +86,15 @@ def create_agent() -> Agent[LumenDeps, str]:
         system_prompt=(
             "你是「Lumen」，用户的 AI 伴侣。性格：深谋远虑但平易近人，说话像一个真正认识你的朋友，"
             "不是客服，不奉承，有时候会说实话，包括用户不想听的。\n\n"
-            "规则：用户提到目标/技能/经历/学校/偏好/决定时必须调用工具保存。\n"
-            "目标→memory_save('goals',方向,动机) | 技能→memory_save('skills',名称,程度)\n"
-            "经历→memory_save('experiences',标题,描述) | 学校→update_profile() | 偏好→memory_save('preferences',名,内容)\n"
+            "规则：用户提到以下信息时必须立即调用工具保存。\n"
+            "职业方向/目标岗位→update_profile(target_direction=...) | 学校/专业/年级→update_profile()\n"
+            "技能→memory_save('skills',名称,程度) | 经历→memory_save('experiences',标题,描述)\n"
+            "偏好→memory_save('preferences',名,内容) | 具体有时限的目标→memory_save('goals',标题,计划)\n"
             "先保存再回答，一句话告知，不要只回「已记录」。\n\n"
             "memory_search scope 选择：问技能/经历/画像→profile；问情绪/焦虑/内心→emotions；"
-            "问公司/行业/学长→reference；问历史对话→chat；跨领域或不确定→不传 scope。\n\n"
+            "问公司/行业/学长→reference；问历史对话→chat；跨领域或不确定→不传 scope。\n"
+            "调用任何工具后必须生成文字回复，不能以工具调用结束对话；"
+            "memory_search 搜到内容时把结果告诉用户，搜不到时说明并给出建议。\n\n"
             "开场白：简短自然，不罗列功能，不问「有什么可以帮您」。"
             "示例：「我是 Lumen。你在哪个阶段，就从哪里说起。」"
         ),
@@ -121,9 +109,7 @@ def create_agent() -> Agent[LumenDeps, str]:
     # 语义上正确：上下文是系统级背景信息，模型能区分「指令+背景」和「用户请求」
     @agent.system_prompt
     async def dynamic_prompt(ctx: RunContext[LumenDeps]) -> str:
-        from sqlalchemy import select
-
-        from app.backend.models.conversation import Conversation, Message
+        from app.backend.models.conversation import Conversation
 
         db = ctx.deps.db
         parts = []
@@ -142,25 +128,6 @@ def create_agent() -> Agent[LumenDeps, str]:
             conv = await db.get(Conversation, ctx.deps.conversation_id)
             if conv and conv.summary:
                 parts.append(f"【对话摘要】\n{conv.summary}")
-        except Exception:
-            pass
-
-        # ── 近期对话历史（最近 10 条）──
-        try:
-            history_result = await db.execute(
-                select(Message)
-                .where(Message.conversation_id == ctx.deps.conversation_id)
-                .order_by(Message.created_at.desc())
-                .limit(10)
-            )
-            history = list(history_result.scalars().all())
-            history.reverse()
-            if history:
-                lines = ["【近期对话】"]
-                for msg in history:
-                    tag = "用户" if msg.role == "user" else "助手"
-                    lines.append(f"{tag}: {(msg.content or '')[:150]}")
-                parts.append("\n".join(lines))
         except Exception:
             pass
 

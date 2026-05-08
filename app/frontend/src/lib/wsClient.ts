@@ -7,6 +7,7 @@ export type WSHandlers = {
   onDone: (conversationId: string, usage?: { input: number; output: number }) => void
   onCancelled: () => void
   onError: (message: string) => void
+  onTrace: (kind: 'call' | 'result', tool: string, content: string, duration?: string) => void
 }
 
 type WSState = 'connecting' | 'connected' | 'disconnected'
@@ -124,6 +125,14 @@ export class ChatWS {
         break
       case 'cancelled':
         this.handlers.onCancelled()
+        break
+      case 'trace':
+        this.handlers.onTrace(
+          String(msg.kind ?? 'call') as 'call' | 'result',
+          String(msg.tool ?? ''),
+          String(msg.content ?? ''),
+          msg.duration ? String(msg.duration) : undefined,
+        )
         break
       case 'error':
         this.handlers.onError(String(msg.message ?? '未知错误'))

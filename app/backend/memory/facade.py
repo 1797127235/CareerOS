@@ -178,6 +178,19 @@ class LumenMemory:
         except Exception as exc:
             logger.warning("Cognee projection skipped", count=len(event_ids) if event_ids else 0, error=str(exc))
 
+    async def force_md_rebuild(self, user_id: str) -> bool:
+        """强制全量重建 .md，不检查 dirty 标记。删除事件后调用。"""
+        from app.backend.memory.projections.markdown import project_user_to_md
+
+        async with get_async_session_maker()() as db:
+            success = await project_user_to_md(db, user_id)
+            if success:
+                await db.commit()
+            else:
+                await db.rollback()
+        invalidate_cache(user_id)
+        return success
+
     async def rebuild(self, user_id: str) -> dict:
         """全量重建 .md + Cognee 索引。"""
         from app.backend.memory.cognee_admin.cognify_loop import get_cognee_status

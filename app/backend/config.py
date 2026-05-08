@@ -12,6 +12,59 @@ from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# ── Provider 目录（Settings / API / Agent / 前端唯一维护处）──
+PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
+    "dashscope": {
+        "label": "DashScope（阿里云）",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "chat_models": ["qwen-plus", "qwen-max", "qwen-turbo"],
+        "embedding_models": ["text-embedding-v4"],
+    },
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "",
+        "chat_models": ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"],
+        "embedding_models": ["text-embedding-3-small", "text-embedding-3-large"],
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "chat_models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+        "embedding_models": [],
+    },
+    "anthropic": {
+        "label": "Anthropic",
+        "base_url": "",
+        "chat_models": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"],
+        "embedding_models": [],
+    },
+    "gemini": {
+        "label": "Gemini（Google）",
+        "base_url": "",
+        "chat_models": ["gemini-1.5-pro", "gemini-1.5-flash"],
+        "embedding_models": ["models/text-embedding-004"],
+    },
+    "ollama": {
+        "label": "Ollama（本地）",
+        "base_url": "http://localhost:11434",
+        "chat_models": ["llama3.1", "qwen2.5", "mistral"],
+        "embedding_models": ["nomic-embed-text", "mxbai-embed-large"],
+    },
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "chat_models": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b"],
+        "embedding_models": [],
+    },
+    "custom": {
+        "label": "自定义（OpenAI-Compatible）",
+        "base_url": "",
+        "chat_models": [],
+        "embedding_models": [],
+    },
+}
+
+
 # ── 目录常量 ────────────────────────────────────────
 
 # 用户运行时数据目录（SQLite / Chroma / config.json）
@@ -37,7 +90,7 @@ class Settings(BaseSettings):
     llm_provider: str = "dashscope"
     llm_model: str = "qwen-plus"
     llm_api_key: str = ""
-    llm_base_url: str = ""  # 空 = 使用 LiteLLM 默认值
+    llm_base_url: str = ""
 
     # ── Embedding Provider ──
     embedding_provider: str = "dashscope"
@@ -100,6 +153,8 @@ def save_user_config(data: dict[str, Any]) -> dict[str, Any]:
     _ensure_user_data_dir()
     config_path = USER_DATA_DIR / "config.json"
     existing = load_user_config()
+    # 过滤空值，不保存空字符串覆盖（含纯空格）
+    data = {k: v for k, v in data.items() if v not in (None, "") and not (isinstance(v, str) and not v.strip())}
     existing.update(data)
     config_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
     return existing
@@ -123,17 +178,17 @@ def apply_user_config(settings: Settings, user_config: dict[str, Any] | None = N
         "embedding_model",
         "embedding_api_key",
         "embedding_base_url",
-        "dashscope_api_key",  # 保留旧字段
     )
 
     for key in _CONFIG_KEYS:
-        if cfg.get(key) is not None and getattr(settings, key, None) != cfg[key]:
-            setattr(settings, key, cfg[key])
+        val = cfg.get(key)
+        if val is not None and val != "" and getattr(settings, key, None) != val:
+            setattr(settings, key, val)
             # key 字段脱敏
             if "key" in key.lower():
                 applied[key] = "***"
             else:
-                applied[key] = cfg[key]
+                applied[key] = val
 
     # 一次性迁移：旧用户 dashscope_api_key → llm_api_key
     # 条件：llm_provider 是 dashscope（或未设置）且 llm_api_key 为空且 dashscope_api_key 非空

@@ -141,13 +141,19 @@ async def reset_memory(user_id: str = Query("demo_user")) -> MemoryResetResponse
         raise HTTPException(status_code=500, detail="清空失败，请查看日志")
 
 
+_MERGE_EVENT_TYPES = {"goal_updated", "preference_learned", "status_changed"}
+
+
 @router.get("/list", response_model=list[MemoryItem])
 async def list_memories(user_id: str = Query("demo_user")) -> list[MemoryItem]:
     """按时间倒序列出该用户的事件记忆（GrowthEvent）。
 
+    对 key-value 类事件（goals/preferences/status）按 key 去重，只保留最新一条，
+    避免同一目标/偏好/状态的历史版本并列堆积。
+
     备注：
     - `memory` 字段优先返回 `payload_json`（更完整）；若为空则回退到简短的拼接描述。
-    - 出错时返回空列表（用于前端“可用即展示”的弱依赖场景）。
+    - 出错时返回空列表（用于前端"可用即展示"的弱依赖场景）。
     """
     _validate_user_id(user_id)
     try:
@@ -156,18 +162,42 @@ async def list_memories(user_id: str = Query("demo_user")) -> list[MemoryItem]:
                 select(GrowthEvent).where(GrowthEvent.user_id == user_id).order_by(GrowthEvent.created_at.desc())
             )
             events = result.scalars().all()
-        return [
-            MemoryItem(
-                id=str(event.id),
-                memory=event.payload_json or f"{event.event_type}: {event.entity_type or 'unknown'}",
-                created_at=event.created_at.isoformat() if event.created_at else None,
-                categories=[event.event_type] if event.event_type else [],
+
+        # key-value 类事件按 key 去重：同 key 只保留最新（时间倒序第一个）
+        seen_keys: dict[str, set[str]] = {t: set() for t in _MERGE_EVENT_TYPES}
+        items: list[MemoryItem] = []
+        for event in events:
+            if event.event_type in _MERGE_EVENT_TYPES:
+                payload = _extract_kv_key(event.payload_json)
+                if payload and payload in seen_keys[event.event_type]:
+                    continue  # 同 key 已存在更新版本，跳过旧版本
+                if payload:
+                    seen_keys[event.event_type].add(payload)
+            items.append(
+                MemoryItem(
+                    id=str(event.id),
+                    memory=event.payload_json or f"{event.event_type}: {event.entity_type or 'unknown'}",
+                    created_at=event.created_at.isoformat() if event.created_at else None,
+                    categories=[event.event_type] if event.event_type else [],
+                )
             )
-            for event in events
-        ]
+        return items
     except Exception as exc:
         logger.error("Memory list failed: %s", exc)
         return []
+
+
+def _extract_kv_key(payload_json: str | None) -> str | None:
+    """从 KeyValuePayload JSON 中提取 key 字段。"""
+    if not payload_json:
+        return None
+    try:
+        import json
+
+        payload = json.loads(payload_json)
+        return payload.get("key") if isinstance(payload, dict) else None
+    except Exception:
+        return None
 
 
 @router.post("/rebuild")
@@ -254,12 +284,13 @@ async def delete_memory(event_id: str, user_id: str = Query("demo_user")) -> dic
             from app.backend.memory.stores.relational import GrowthEventRepository
 
             repo = GrowthEventRepository(db)
+            await repo.drop_fts_triggers()
             await db.execute(text("DELETE FROM growth_events WHERE id = :id"), {"id": event_id})
             await repo.rebuild_fts_index()
             await db.commit()
 
-        # 删除事件后需要重新投影 `.md` 文件，确保用户画像与事件表一致。
-        await sync_user_md_projection(user_id)
+        # 删除事件后强制全量重建 .md，不能用 sync_user_md_projection（会因无 dirty 事件而跳过）
+        await get_memory().force_md_rebuild(user_id)
 
         logger.info("Memory deleted: id=%s, user_id=%s", event_id, user_id)
         return {"deleted": event_id}

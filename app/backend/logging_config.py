@@ -14,6 +14,7 @@ import logging
 import sys
 import uuid
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -21,6 +22,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from structlog.contextvars import bind_contextvars, clear_contextvars, merge_contextvars
+
+# ── 日志文件路径 ────────────────────────────────────────────
+LOG_DIR = Path.home() / ".lumen" / "logs"
+LOG_FILE = LOG_DIR / "lumen.log"
 
 # ── 上下文变量 ──────────────────────────────────────────────
 
@@ -73,21 +78,40 @@ def setup_logging(json_logs: bool = False, log_level: str = "INFO") -> None:
         cache_logger_on_first_use=True,
     )
 
-    # 配置 stdlib handler
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
+    # 配置控制台 handler（彩色输出）
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
             processor=renderer,
             foreign_pre_chain=shared_processors,
         )
     )
 
+    handlers: list[logging.Handler] = [console_handler]
+
+    # 配置文件 handler（JSON 格式，便于程序解析）
+    if not json_logs:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processor=structlog.processors.JSONRenderer(),
+                foreign_pre_chain=shared_processors,
+            )
+        )
+        handlers.append(file_handler)
+
     # 过滤噪音日志
     _suppress_noisy_loggers()
 
     # 配置根日志器
     root_logger = logging.getLogger()
-    root_logger.handlers = [handler]
+    root_logger.handlers = handlers
     root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
 

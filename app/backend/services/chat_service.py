@@ -76,7 +76,6 @@ async def _background_memory_review(
         from app.backend.db.base import get_async_session_maker
 
         async with get_async_session_maker()() as db:
-            from app.backend.agent.deps import LumenDeps
             from app.backend.agent.pydantic_agent import get_agent
 
             agent = get_agent()
@@ -116,6 +115,29 @@ def _log_task_error(task: asyncio.Task) -> None:
         logger.error("后台任务异常", exc_info=exc)
 
 
+def _load_pydantic_history(conv) -> list:
+    """反序列化 conversation.pydantic_messages → list[ModelMessage]。"""
+    from pydantic_ai import ModelMessagesTypeAdapter
+
+    if not conv.pydantic_messages:
+        return []
+    try:
+        return ModelMessagesTypeAdapter.validate_json(conv.pydantic_messages.encode())
+    except Exception:
+        return []
+
+
+def _save_pydantic_history(conv, new_msgs: list) -> None:
+    """追加 new_msgs 并序列化写回 conv.pydantic_messages，保留最近 30 条。"""
+    from pydantic_core import to_json
+
+    if not new_msgs:
+        return
+    existing = _load_pydantic_history(conv)
+    updated = (existing + new_msgs)[-30:]
+    conv.pydantic_messages = to_json(updated).decode()
+
+
 async def stream_chat(
     db: AsyncSession,
     user_id: str,
@@ -146,13 +168,14 @@ async def stream_chat(
     yield _sse_token("", conv.conversation_id)  # 初始事件（返回 conversation_id）
 
     # 保存用户消息
-    user_message = Message(
-        conversation_id=conv.conversation_id,
-        role="user",
-        content=user_input,
-        intent="consultation",
+    db.add(
+        Message(
+            conversation_id=conv.conversation_id,
+            role="user",
+            content=user_input,
+            intent="consultation",
+        )
     )
-    db.add(user_message)
     conv.message_count = (conv.message_count or 0) + 1
     conv.last_message_at = datetime.now(UTC)
     try:
@@ -179,11 +202,16 @@ async def stream_chat(
             current_user_input=user_input,
         )
 
+        # 加载 PydanticAI 消息历史
+        history = _load_pydantic_history(conv)
+
         full_content = ""
         usage_data: dict | None = None
+        new_msgs: list = []
         try:
             async with agent.run_stream(
                 user_input,
+                message_history=history,
                 deps=deps,
                 model_settings=ModelSettings(max_tokens=4096),
             ) as response:
@@ -200,6 +228,8 @@ async def stream_chat(
                 except Exception:
                     pass
 
+                new_msgs = response.new_messages()
+
         finally:
             # 无论正常完成还是客户端断开，都保存已生成的内容
             if full_content:
@@ -213,6 +243,7 @@ async def stream_chat(
                 )
                 conv.message_count = (conv.message_count or 0) + 1
                 conv.last_message_at = datetime.now(UTC)
+                _save_pydantic_history(conv, new_msgs)
                 try:
                     await db.commit()
                 except Exception:
@@ -240,10 +271,17 @@ async def stream_chat(
                         )
                     )
                     task.add_done_callback(_log_task_error)
-    except Exception:
-        logger.exception("生成 AI 回复失败", conversation_id=conv.conversation_id)
-        await db.rollback()
-        yield _sse_error("生成回复失败，请稍后重试")
+    except Exception as exc:
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+        if isinstance(exc, UnexpectedModelBehavior) and "without content" in str(exc):
+            logger.warning("模型返回空响应", conversation_id=conv.conversation_id, error=str(exc))
+            await db.rollback()
+            yield _sse_error("模型未返回内容，可能触发了内容过滤，请换一种说法重试")
+        else:
+            logger.exception("生成 AI 回复失败", conversation_id=conv.conversation_id)
+            await db.rollback()
+            yield _sse_error("生成回复失败，请稍后重试")
         return
 
     # 滚动摘要：后台异步执行，不阻塞 SSE
@@ -287,13 +325,14 @@ async def stream_chat_ws(
     yield {"type": "token", "content": "", "conversation_id": conv.conversation_id}
 
     # 保存用户消息
-    user_message = Message(
-        conversation_id=conv.conversation_id,
-        role="user",
-        content=user_input,
-        intent="consultation",
+    db.add(
+        Message(
+            conversation_id=conv.conversation_id,
+            role="user",
+            content=user_input,
+            intent="consultation",
+        )
     )
-    db.add(user_message)
     conv.message_count = (conv.message_count or 0) + 1
     conv.last_message_at = datetime.now(UTC)
     try:
@@ -318,32 +357,93 @@ async def stream_chat_ws(
             current_user_input=user_input,
         )
 
+        # 加载 PydanticAI 消息历史
+        history = _load_pydantic_history(conv)
+
         full_content = ""
         usage_data: dict | None = None
         cancelled = False
+        new_msgs: list = []
 
         try:
-            async with agent.run_stream(
+            from pydantic_ai.messages import TextPartDelta
+
+            async for event in agent.run_stream_events(
                 user_input,
+                message_history=history,
                 deps=deps,
                 model_settings=ModelSettings(max_tokens=4096),
-            ) as response:
-                async for text in response.stream_text(delta=True):
-                    if cancel_event.is_set():
-                        cancelled = True
-                        break
-                    full_content += text
-                    yield {"type": "token", "content": text, "conversation_id": conv.conversation_id}
+            ):
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
 
-                if not cancelled:
+                ek = event.event_kind
+
+                if ek == "function_tool_call":
+                    args = getattr(event, "args", None) or getattr(getattr(event, "part", None), "args", None)
                     try:
-                        u = response.usage()
-                        usage_data = {
-                            "input": u.request_tokens or 0,
-                            "output": u.response_tokens or 0,
+                        args_str = json.dumps(args, ensure_ascii=False) if isinstance(args, dict) else str(args or "")
+                    except (TypeError, ValueError):
+                        args_str = str(args or "")
+                    if len(args_str) > 300:
+                        args_str = args_str[:297] + "..."
+                    tool_name = (
+                        getattr(event, "tool_name", None)
+                        or getattr(getattr(event, "part", None), "tool_name", None)
+                        or ""
+                    )
+                    yield {
+                        "type": "trace",
+                        "kind": "call",
+                        "tool": tool_name,
+                        "content": args_str,
+                    }
+
+                elif ek == "function_tool_result":
+                    content = getattr(event, "content", None)
+                    if content is None:
+                        content = ""
+                    elif not isinstance(content, str):
+                        try:
+                            content = json.dumps(content, ensure_ascii=False)
+                        except (TypeError, ValueError):
+                            content = str(content)
+                    if len(content) > 500:
+                        content = content[:497] + "..."
+                    tool_name = (
+                        getattr(event, "tool_name", None)
+                        or getattr(getattr(event, "part", None), "tool_name", None)
+                        or ""
+                    )
+                    yield {
+                        "type": "trace",
+                        "kind": "result",
+                        "tool": tool_name,
+                        "content": content,
+                    }
+
+                elif ek == "part_delta":
+                    if isinstance(event.delta, TextPartDelta):
+                        text = event.delta.content_delta or ""
+                        full_content += text
+                        yield {
+                            "type": "token",
+                            "content": text,
+                            "conversation_id": conv.conversation_id,
                         }
-                    except Exception:
-                        pass
+
+                elif ek == "agent_run_result":
+                    new_msgs = event.result.new_messages()
+                    if not cancelled:
+                        try:
+                            u = event.result.usage()
+                            usage_data = {
+                                "input": u.request_tokens or 0,
+                                "output": u.response_tokens or 0,
+                            }
+                        except Exception:
+                            pass
 
         finally:
             # 无论正常完成还是取消，都保存已生成的内容
@@ -358,6 +458,7 @@ async def stream_chat_ws(
                 )
                 conv.message_count = (conv.message_count or 0) + 1
                 conv.last_message_at = datetime.now(UTC)
+                _save_pydantic_history(conv, new_msgs)
                 try:
                     await db.commit()
                 except Exception:
@@ -390,26 +491,20 @@ async def stream_chat_ws(
             return
 
     except asyncio.CancelledError:
-        # 任务被取消，保存已生成内容
-        if full_content:
-            db.add(
-                Message(
-                    conversation_id=conv.conversation_id,
-                    role="assistant",
-                    content=full_content,
-                    intent="consultation",
-                )
-            )
-            try:
-                await db.commit()
-            except Exception:
-                await db.rollback()
+        # 已生成内容会在 finally 中保存，这里只负责返回取消事件
         yield {"type": "cancelled", "conversation_id": conv.conversation_id}
         return
-    except Exception:
-        logger.exception("生成 AI 回复失败", conversation_id=conv.conversation_id)
-        await db.rollback()
-        yield {"type": "error", "message": "生成回复失败，请稍后重试"}
+    except Exception as exc:
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+        if isinstance(exc, UnexpectedModelBehavior) and "without content" in str(exc):
+            logger.warning("模型返回空响应", conversation_id=conv.conversation_id, error=str(exc))
+            await db.rollback()
+            yield {"type": "error", "message": "模型未返回内容，可能触发了内容过滤，请换一种说法重试"}
+        else:
+            logger.exception("生成 AI 回复失败", conversation_id=conv.conversation_id)
+            await db.rollback()
+            yield {"type": "error", "message": "生成回复失败，请稍后重试"}
         return
 
     # 滚动摘要
@@ -491,8 +586,8 @@ async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
             from app.backend.config import get_settings
 
             settings = get_settings()
-            provider = settings.llm_provider or "dashscope"
-            model = settings.llm_model or "qwen-plus"
+            provider = settings.llm_provider
+            model = settings.llm_model
             model_id = model if provider == "openai" else f"{provider}/{model}"
             api_key = settings.llm_api_key or settings.dashscope_api_key or ""
             base_url = settings.llm_base_url

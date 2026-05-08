@@ -56,6 +56,7 @@ async def _migrate_sqlite(conn):
     for sql in [
         "DROP TABLE IF EXISTS jd_diagnoses",
         "ALTER TABLE conversations ADD COLUMN summary TEXT",
+        "ALTER TABLE conversations ADD COLUMN pydantic_messages TEXT",
         "ALTER TABLE growth_events ADD COLUMN dedupe_key VARCHAR(128)",
         "ALTER TABLE growth_events ADD COLUMN payload_hash VARCHAR(64)",
         "ALTER TABLE growth_events ADD COLUMN projected_md_at DATETIME",

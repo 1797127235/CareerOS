@@ -35,8 +35,6 @@ def register(agent: Agent[LumenDeps, str]) -> None:
         """保存记忆。主动调用！不要等用户要求！不要等用户说"请保存"或"帮我记住"！
 
         WHEN TO SAVE —— 遇到以下情况立即调用：
-          用户说"我想做XX / 想学XX / 对XX感兴趣"
-            → entity_type='goals', section=方向名, content=用户动机+上下文
           用户说"我会XX / 学过XX / 写过XX"
             → entity_type='skills', section=技能名, content=掌握程度
           用户分享经历（项目、实习、比赛）
@@ -47,9 +45,13 @@ def register(agent: Agent[LumenDeps, str]) -> None:
             → entity_type='decisions', section=决策标题, content=理由
           用户表达了焦虑、困惑、当前状态
             → entity_type='status', section=状态描述, content=详情
+          用户提到具体、有时限的目标（如"想6月前找到实习"）
+            → entity_type='goals', section=目标标题, content=具体计划
 
-        entity_type: skills/experiences/goals/preferences/decisions/status
-        注意：结构化画像字段（学校、专业等）用 update_profile"""
+        注意：
+        - 职业方向/目标岗位（"我想做C++开发/产品/算法"）→ 用 update_profile(target_direction=...) 而非此工具
+        - 学校/专业/年级等画像字段 → 用 update_profile
+        entity_type: skills/experiences/goals/preferences/decisions/status"""
         logger.info("Tool call: memory_save", entity_type=entity_type, section=section)
 
         if entity_type not in _EVENT_TYPE_MAP:

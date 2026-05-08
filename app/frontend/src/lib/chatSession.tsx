@@ -11,10 +11,20 @@ import { getConversation } from './api'
 import { ChatWS } from './wsClient'
 import { getUserId } from './userId'
 
+export type TraceEntry = {
+  tool: string
+  args: string
+  result: string
+  done: boolean
+  thinking?: string  // thinking 的内容
+  duration?: string  // "6s"
+}
+
 export type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   usage?: { input: number; output: number }
+  traces?: TraceEntry[]
 }
 
 type ChatSessionValue = {
@@ -114,6 +124,50 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
             return prev.slice(0, -1)
           }
           return prev
+        })
+      },
+      onTrace: (kind, tool, content, duration) => {
+        if (completedRef.current) return
+        setMessages((prev) => {
+          const next = prev.slice()
+          const last = next[next.length - 1]
+          if (!last || last.role !== 'assistant') return prev
+
+          const traces = last.traces ? [...last.traces] : []
+
+          if (kind === 'call') {
+            traces.push({
+              tool,
+              args: content,
+              result: '',
+              done: false,
+              thinking: tool === 'thinking' ? '' : undefined,
+              duration: undefined,
+            })
+          } else {
+            // result: 匹配最后一个未完成的 trace
+            const idx = traces.map((t) => t.done).lastIndexOf(false)
+            if (idx >= 0) {
+              // 使用 trace 自己记录的 tool，而不是回调参数
+              if (traces[idx].tool === 'thinking') {
+                traces[idx] = {
+                  ...traces[idx],
+                  thinking: content,
+                  done: true,
+                  duration,
+                }
+              } else {
+                traces[idx] = {
+                  ...traces[idx],
+                  result: content,
+                  done: true,
+                }
+              }
+            }
+          }
+
+          next[next.length - 1] = { ...last, traces }
+          return next
         })
       },
     })

@@ -1,5 +1,4 @@
 """Cognee 1.0.5 初始化 + 后台 cognify 循环。
-
 从 agent/cognee_client.py 迁移而来。"""
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ def init_cognee() -> str:
 
         if llm_api_key and llm_base_url:
             _cognee.config.set_llm_provider("openai")
-            _cognee.config.set_llm_model(settings.llm_model or "qwen-plus")
+            _cognee.config.set_llm_model(settings.llm_model)
             _cognee.config.set_llm_api_key(llm_api_key)
             _cognee.config.set_llm_endpoint(llm_base_url)
 

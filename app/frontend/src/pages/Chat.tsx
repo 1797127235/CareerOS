@@ -71,6 +71,7 @@ export default function Chat() {
               text={message.content}
               streaming={streaming && index === messages.length - 1}
               usage={message.usage}
+              traces={message.traces}
             />
           ) : (
             <UserBubble key={index} text={message.content} />
@@ -99,10 +100,12 @@ function AssistantBubble({
   text,
   streaming,
   usage,
+  traces,
 }: {
   text: string
   streaming: boolean
   usage?: { input: number; output: number }
+  traces?: import('../lib/chatSession').TraceEntry[]
 }) {
   const segments = parseThinkSegments(text)
 
@@ -110,6 +113,10 @@ function AssistantBubble({
     <div className="ink-fade-in">
       <div className="mb-2xs text-xs text-text-subtle">学长</div>
       <div className="mb-sm h-px w-12 bg-border" />
+
+      {traces && traces.length > 0 ? (
+        <TracePanel traces={traces} streaming={streaming} />
+      ) : null}
 
       {segments.map((seg, i) =>
         seg.kind === 'think' ? (
@@ -310,5 +317,79 @@ function ThinkingCard({ content, closed }: { content: string; closed: boolean })
         </pre>
       </div>
     </details>
+  )
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  memory_search: '搜索记忆',
+  memory_save: '保存记忆',
+  update_profile: '更新画像',
+  get_profile: '读取画像',
+  thinking: '思考',
+}
+
+function TracePanel({
+  traces,
+  streaming,
+}: {
+  traces: import('../lib/chatSession').TraceEntry[]
+  streaming: boolean
+}) {
+  if (!traces.length) return null
+
+  return (
+    <div className="mb-sm flex flex-col gap-2xs">
+      {traces.map((trace, i) => (
+        <details
+          key={i}
+          open={!trace.done && streaming}
+          className="group/trace overflow-hidden rounded-lg border border-border-soft bg-surface/40"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-xs px-sm py-[5px] text-xs text-text-subtle hover:text-text-muted [&::-webkit-details-marker]:hidden">
+            <svg
+              className="h-3 w-3 shrink-0 transition-transform group-open/trace:rotate-180"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+            <span>
+              {trace.tool === 'thinking'
+                ? trace.done && trace.duration
+                  ? `思考 · 用时 ${trace.duration}`
+                  : '思考中...'
+                : TOOL_LABELS[trace.tool] ?? trace.tool}
+            </span>
+            {!trace.done && streaming && (
+              <span className="ml-xs animate-pulse text-text-subtle">···</span>
+            )}
+          </summary>
+          <div className="border-t border-border-soft px-sm py-xs space-y-2xs">
+            {trace.tool === 'thinking' ? (
+              <div className="text-xs text-text-subtle whitespace-pre-wrap">
+                {trace.thinking || '...'}
+              </div>
+            ) : (
+              <>
+                {trace.args && (
+                  <div className="text-xs text-text-subtle">
+                    <span className="text-text-subtle/60">参数 </span>
+                    <span className="font-mono">{trace.args}</span>
+                  </div>
+                )}
+                {trace.result && (
+                  <div className="text-xs text-text-subtle">
+                    <span className="text-text-subtle/60">结果 </span>
+                    <span>{trace.result}</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </details>
+      ))}
+    </div>
   )
 }

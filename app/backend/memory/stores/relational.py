@@ -9,7 +9,6 @@ import json
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.logging_config import get_logger
@@ -90,11 +89,21 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         payload: dict | None = None,
         source: str = "system",
     ) -> GrowthEvent | None:
-        """创建 GrowthEvent，带 payload 去重。重复则返回 None。"""
+        """创建 GrowthEvent，带 payload 去重。重复则返回 None。
+
+        使用 SELECT-before-INSERT 替代 savepoint，避免 aiosqlite 的
+        begin_nested() 在 agent stream 中引发 PROVISIONING_CONNECTION 错误。
+        单用户 SQLite 场景下无并发冲突风险。
+        """
         payload_hash = _make_payload_hash(payload)
         dedupe_key = _make_dedupe_key(event_type, entity_type, entity_id, payload_hash)
-        payload_json = json.dumps(payload, ensure_ascii=False) if payload else None
 
+        existing = await self.db.execute(select(GrowthEvent.id).where(GrowthEvent.dedupe_key == dedupe_key))
+        if existing.scalar_one_or_none() is not None:
+            logger.debug("Skipped duplicate event", user_id=user_id, dedupe_key=dedupe_key)
+            return None
+
+        payload_json = json.dumps(payload, ensure_ascii=False) if payload else None
         event = GrowthEvent(
             user_id=user_id,
             event_type=event_type,
@@ -105,19 +114,21 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
             dedupe_key=dedupe_key,
             payload_hash=payload_hash,
         )
+        self.db.add(event)
+        await self.db.flush()
+        return event
 
-        try:
-            # savepoint 内 flush：失败不污染外层事务
-            async with self.db.begin_nested():
-                self.db.add(event)
-                await self.db.flush()
-            return event
-        except IntegrityError as exc:
-            err_str = str(exc.orig) if exc.orig else ""
-            if "dedupe_key" in err_str or "uq_growth_events_user_dedupe" in err_str:
-                logger.debug("Skipped duplicate event", user_id=user_id, dedupe_key=dedupe_key)
-                return None
-        raise
+    _FTS_TRIGGERS = (
+        "trg_growth_events_ad",
+        "trg_growth_events_tri_ad",
+        "trg_growth_events_au",
+        "trg_growth_events_tri_au",
+    )
+
+    async def drop_fts_triggers(self) -> None:
+        """删除 FTS5 相关触发器。DELETE 前调用，避免 SQLite 3.45 SQL logic error。"""
+        for name in self._FTS_TRIGGERS:
+            await self.db.execute(text(f"DROP TRIGGER IF EXISTS {name}"))
 
     async def rebuild_fts_index(self) -> None:
         """重建 FTS5 全文索引（含触发器）。
@@ -126,12 +137,7 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         策略：删触发器 → 删主表行 → drop + 重建 FTS → 重建触发器。
         """
         # 删除旧触发器
-        for name in (
-            "trg_growth_events_ad",
-            "trg_growth_events_tri_ad",
-            "trg_growth_events_au",
-            "trg_growth_events_tri_au",
-        ):
+        for name in self._FTS_TRIGGERS:
             await self.db.execute(text(f"DROP TRIGGER IF EXISTS {name}"))
 
         # 删除 + 重建 FTS 表

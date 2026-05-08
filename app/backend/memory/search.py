@@ -85,16 +85,36 @@ async def _search_cognee(
     return results
 
 
+_FTS5_SPECIAL_RE = _re.compile(r'[+\-*"()^@]')
+
+
+def _sanitize_fts5(query: str) -> str | None:
+    """移除 FTS5 保留操作符，避免语法错误（如 C++、C#）。"""
+    sanitized = _FTS5_SPECIAL_RE.sub(" ", query).strip()
+    return sanitized or None
+
+
+def _escape_fts5(query: str) -> str:
+    """转义 FTS5 MATCH 查询中的特殊字符。
+
+    FTS5 MATCH 将 + - * / ( ) " 等视为操作符/保留字符。
+    用双引号包裹整个查询可将其视为字面量词组，同时转义内部的双引号。
+    """
+    escaped = query.replace('"', '""')
+    return f'"{escaped}"'
+
+
 async def _search_fts5(user_id: str, query: str, limit: int, seen: set[str]) -> list[MemoryItem]:
     """SQLite FTS5 全文搜索。"""
     results: list[MemoryItem] = []
     try:
         fts_table = "growth_events_fts_trigram" if _CJK_RE.search(query) else "growth_events_fts"
+        safe_query = _escape_fts5(query)
         async with get_async_session_maker()() as db:
             rows = (
                 await db.execute(
                     _fts_query(fts_table),
-                    {"uid": user_id, "q": query, "lim": limit},
+                    {"uid": user_id, "q": safe_query, "lim": limit},
                 )
             ).all()
 
