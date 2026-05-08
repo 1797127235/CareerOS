@@ -1,5 +1,4 @@
 """对话摘要服务 — 滚动摘要生成。
-
 从 services/chat_service.py 提取。当 conv 消息数达到阈值时，
 将窗口外的旧消息压缩为摘要并写入 Conversation.summary。
 """

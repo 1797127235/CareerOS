@@ -1,4 +1,4 @@
-# CareerOS — Docker 多阶段构建
+# Lumen — Docker 多阶段构建
 # Stage 1: npm build 前端
 # Stage 2: pip install + 运行 uvicorn
 

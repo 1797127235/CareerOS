@@ -2,7 +2,7 @@
 
 ## What This Is
 
-CareerOS — 面向中国 CS 学生的自托管 AI 职业规划助手。FastAPI + SQLAlchemy + DashScope (qwen-plus/qwen-max) + LiteLLM + SQLite。前端 React 19 + Vite + Tailwind CSS 4。
+Lumen — 一个真正认识你的 AI 伴侣。FastAPI + SQLAlchemy + PydanticAI + LiteLLM + SQLite。前端 React 19 + Vite + Tailwind CSS 4。
 
 ## How to Run
 
@@ -19,7 +19,7 @@ cd app/frontend && npm install && cd ../..
 # 打开 http://localhost:5173
 ```
 
-启动后自动建表（SQLite），无需手动迁移。首次启动自动初始化记忆目录（`~/.careeros/memory/`）。
+启动后自动建表（SQLite），无需手动迁移。首次启动自动初始化记忆目录（`~/.lumen/memory/`）。
 
 ## Project Structure
 
@@ -34,24 +34,25 @@ career-os/
 │   ├── models/
 │   │   ├── user.py           # User + UserProfile（含 profile_data JSON）
 │   │   ├── conversation.py   # Conversation + Message
+│   │   ├── growth_event.py   # GrowthEvent 事件溯源
 │   │   └── agent_trace.py    # AgentTrace 可观测性
 │   ├── agent/
 │   │   ├── pydantic_agent.py  # PydanticAI Agent 定义 + 动态系统提示词
-│   │   ├── pydantic_tools.py  # Agent 工具（get_profile, update_profile）
+│   │   ├── tools/             # Agent 工具（memory_search, memory_save, profile）
 │   │   ├── llm_router.py     # LLM 路由（多 Provider），流式+非流式
-│   │   └── deps.py           # Agent 依赖注入（CareerOSDeps）
+│   │   └── deps.py           # Agent 依赖注入（LumenDeps）
 │   ├── routers/
 │   │   ├── health.py         # GET /api/health
 │   │   ├── chat.py           # POST /api/chat (SSE), GET /api/chat/history, DELETE /api/chat/{id}
-│   │   ├── profile.py        # POST /api/profile/resume, GET/PATCH/DELETE /api/profile/me
 │   │   ├── memory.py         # GET /api/memory/stats, /api/memory/list, POST /api/memory/reset
 │   │   └── config_router.py  # GET/POST /api/config
 │   ├── schemas/
 │   │   └── profile.py        # ProfileResponse, ProfileUpdate, SkillItem（含 context）
 │   └── services/
 │       ├── chat_service.py   # 对话业务：Agent Loop 集成 + SSE 流式输出
-│       ├── profile_service.py # 简历提取 + LLM 解析 + DB 写入
-│       └── skill_service.py  # 技能记录 CRUD
+│       ├── memory_service.py  # 记忆投影（growth_events → .md）
+│       ├── review_service.py  # 后台记忆审查兜底
+│       └── summary_service.py # 对话摘要生成
 ├── app/frontend/
 │   └── src/
 │       ├── pages/
@@ -84,10 +85,6 @@ career-os/
 | `GET`  | `/api/chat/history?user_id=&limit=` | 对话历史列表 |
 | `GET`  | `/api/chat/{conversation_id}` | 单条会话消息详情 |
 | `DELETE` | `/api/chat/{conversation_id}` | 删除对话及其消息 |
-| `POST` | `/api/profile/resume?user_id=` | 上传简历（PDF/DOCX/TXT），LLM 自动提取画像 |
-| `GET`  | `/api/profile/me?user_id=` | 获取当前用户画像 |
-| `PATCH` | `/api/profile/me?user_id=` | 局部更新用户画像（null 可清空字段） |
-| `DELETE` | `/api/profile/me?user_id=` | 重置用户画像（保留 nickname） |
 | `GET`  | `/api/memory/stats?user_id=` | 记忆统计（状态、数量） |
 | `GET`  | `/api/memory/list?user_id=` | 记忆列表 |
 | `POST` | `/api/memory/reset?user_id=` | 重置记忆 |
@@ -97,10 +94,10 @@ career-os/
 ## Key Architecture Decisions
 
 - **Agent 系统**：PydanticAI 实现（`pydantic_agent.py`），支持工具调用、动态系统提示词、流式输出
-- **工具注册**：`@agent.tool` 装饰器注册工具，3 个核心工具：`memory_search`、`memory_update`、`memory_add`
+- **工具注册**：`@agent.tool` 装饰器注册工具，3 个核心工具：`memory_search`、`memory_save`、`update_profile`
 - **LLM 路由**：`llm_router.py` 支持多 Provider（DashScope/OpenAI/DeepSeek 等），通过 LiteLLM 统一调用
-- **记忆层**：.md 文件记忆系统（`memory_service.py`），`memory.md` 存核心画像，`entities/*.md` 存技能/经历/偏好等
-- **数据库**：SQLite（`career_os.db`），`lifespan` 中 `Base.metadata.create_all` 自动建表
+- **记忆层**：growth_events → .md 投影（`memory_service.py`），`memory.md` 存核心画像，`entities/*.md` 存技能/经历/偏好等
+- **数据库**：SQLite（`lumen.db`），`lifespan` 中 `Base.metadata.create_all` 自动建表
 - **画像数据模型**：扩展字段存入 `profile_data` JSON 列，零 ORM 列新增
 - **聊天状态**：`chatSession.tsx` 全局 Context Provider，跨页面保持对话状态
 - **可观测性**：`agent_traces` 表记录 Agent 推理步骤、工具调用、耗时
@@ -110,8 +107,8 @@ career-os/
 根目录有 `.env` 文件，包含 DashScope API Key 等。**不要提交到 git**。
 
 关键配置：
-- `DASHSCOPE_API_KEY` — LLM 调用
-- `DATABASE_URL` — 默认 `~/.careeros/career_os.db`
+- `LLM_API_KEY` / `DASHSCOPE_API_KEY` — LLM 调用
+- `DATABASE_URL` — 默认 `~/.lumen/lumen.db`
 - `DEBUG` — `true`（开发）/ `false`（生产）
 
 ## Code Style
@@ -137,7 +134,8 @@ career-os/
 ## docs/
 
 设计文档在 `docs/` 下：
-- `docs/需求/` — 用户画像 + 功能需求清单
-- `docs/架构/` — 系统架构、安全合规
-- `docs/功能设计/` — 各核心功能详细设计
-- `docs/frontend-design.md` — 前端设计文档
+- `docs/architecture/` — 系统架构设计与核心决策
+- `docs/memory-structure/` — 记忆结构（memory.md + entities/*.md）
+- `docs/stories/` — 功能实现 story 记录
+- `docs/product-brief.md` — 产品简介
+- `docs/project-context.md` — AI Agent 编码规则

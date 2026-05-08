@@ -189,14 +189,11 @@ Agent 调了工具？ → sync_projections → .md
 
 ## 文档
 
-- [项目概览](docs/project-overview.md) — 项目简介和技术栈
-- [系统架构](docs/architecture.md) — 架构设计和核心决策
-- [API 契约](docs/api-contracts.md) — API 端点文档
-- [数据模型](docs/data-models.md) — 数据库模型文档
-- [开发指南](docs/development-guide.md) — 开发环境搭建
-- [Project Context](docs/project-context.md) — AI Agent 实现规则
-
-完整文档索引：[docs/index.md](docs/index.md)
+- [产品简介](docs/product-brief.md) — 产品定位和价值主张
+- [系统架构](docs/architecture/) — 架构设计和核心决策
+- [记忆结构](docs/memory-structure/) — 记忆数据模型和实体定义
+- [Project Context](docs/project-context.md) — AI Agent 编码规则
+- [Stories](docs/stories/) — 功能实现记录
 
 ---
 
@@ -236,7 +233,9 @@ git push origin feat/your-feature
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `DASHSCOPE_API_KEY` | ✅ | DashScope API Key（也可在设置页填写） |
+| `LLM_API_KEY` | ✅ | LLM API Key（也可在设置页填写） |
+| `LLM_PROVIDER` | ❌ | 默认 `dashscope`（可选 openai/deepseek 等） |
+| `LLM_MODEL` | ❌ | 默认 `qwen-plus` |
 | `DATABASE_URL` | ❌ | 默认 `~/.lumen/lumen.db` |
 | `DEBUG` | ❌ | `true`（开发）/ `false`（Docker 生产） |
 

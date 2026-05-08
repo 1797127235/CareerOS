@@ -1,4 +1,4 @@
-# CareerOS Project Context
+# Lumen Project Context
 
 > AI Agent 实现代码时必须遵循的关键规则和模式。
 > 聚焦于容易被忽略的细节，优化 LLM 上下文效率。
@@ -164,7 +164,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 - **必须** Agent 写入走 `memory_save(entity_type, section, content)` 或 `update_profile(14 params)`，禁止直接操作 `.md` 文件
 - **必须** 写入后 `deps.pending_event_ids` 会累积事件 ID，需在 `finally` 块中调用 `sync_projections()`
-- **必须** `CareerOSDeps` 含 `pending_event_ids: list[str]`，用于追踪本轮 Agent 调用产生的记忆事件
+- **必须** `LumenDeps` 含 `pending_event_ids: list[str]`，用于追踪本轮 Agent 调用产生的记忆事件
 - **必须** FTS5 由 `lifespan` 自动建表 + 触发器，代码中不可手动 DROP/CREATE（DELETE 端点除外）
 - **必须** 记忆去重用 `dedupe_key = {event_type}:{entity_type}:{entity_id}` 的 UNIQUE 约束，冲突时返回 `None`
 - **必须** 后台审查失败不能影响用户，用 `logger.exception` 记录
@@ -197,4 +197,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 ---
 
-Last Updated: 2026-05-06
+Last Updated: 2026-05-09
