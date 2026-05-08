@@ -5,14 +5,18 @@
 - L1 近期块：最近 N 条事件（类型权重过滤）
 - L2 语义召回：由 facade.build_context() 根据 user_input 追加（Cognee→FTS5→.md）
 
-缓存策略：projection flush/sync/rebuild 时由 facade 触发 invalidate_cache() 失效。
+缓存策略：projection flush/sync/rebuild 时由 facade 触发 invalidate_cache() 失效；
+           同时缓存有 5 分钟 TTL，确保 L1 时间窗口准实时。
 """
 
 from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
 
 from app.backend.db.base import get_async_session_maker
 from app.backend.logging_config import get_logger
@@ -42,19 +46,47 @@ _EVENT_DECAY_WEIGHTS: dict[str, float] = {
     "skill_level_changed": 0.2,  # 技能变更：中等衰减
     "preference_learned": 0.3,  # 偏好：中等偏快
     "status_changed": 0.4,  # 状态：快速衰减
-    "experience_added": 0.5,  # 经历：快速衰减
+    "experience_added": 0.3,  # 经历：中等偏快（原为0.5，10天丢弃太激进）
     "decision_made": 0.3,  # 决策：中等偏快
 }
 
 # 衰减阈值：得分 > 此值时丢弃
 _DECAY_THRESHOLD = 5.0
 
-_static_cache: dict[str, tuple[str, str]] = {}
+# 缓存 TTL（分钟）
+_CACHE_TTL_MINUTES = 5
+
+
+@dataclass
+class _CacheEntry:
+    """带时间戳的缓存条目。"""
+
+    user_id: str
+    content: str
+    created_at: datetime
+    recent_event_ids: set[str]  # L1 中包含的事件 ID，用于 L2 去重
+
+
+# 用户级缓存：user_id → _CacheEntry
+_static_cache: dict[str, _CacheEntry] = {}
 
 
 def invalidate_cache(user_id: str) -> None:
     """projection flush/sync/rebuild 时调用，使缓存失效。"""
     _static_cache.pop(user_id, None)
+
+
+def get_recent_event_ids(user_id: str) -> set[str]:
+    """获取当前缓存中 L1 近期块包含的事件 ID 集合（供 L2 去重使用）。
+
+    如果缓存不存在或已过期，返回空集合。
+    """
+    entry = _static_cache.get(user_id)
+    if entry is None:
+        return set()
+    if (datetime.now(UTC) - entry.created_at) >= timedelta(minutes=_CACHE_TTL_MINUTES):
+        return set()
+    return entry.recent_event_ids
 
 
 def _truncate(text: str, limit: int, suffix: str = "…") -> str:
@@ -73,7 +105,6 @@ def _build_fixed_block(
     """构建 L0 固定块（身份 + 目标 + 技能 + 偏好），总预算 800 字。"""
     parts: list[str] = []
     budget = _FIXED_BUDGET
-
     # ── 身份（300 字）──
     identity_lines: list[str] = []
     identity_lines.append("## 身份")
@@ -125,10 +156,14 @@ def _build_fixed_block(
     return "\n\n".join(parts)
 
 
-def _build_recent_block(events: list) -> str:
-    """构建 L1 近期块：最近事件，按类型衰减过滤。"""
+def _build_recent_block(events: list) -> tuple[str, set[str]]:
+    """构建 L1 近期块：最近事件，按类型衰减过滤。
+
+    Returns:
+        (block_text, event_ids): 文本块 + 包含的事件 ID 集合（用于 L2 去重）
+    """
     now = datetime.now(UTC)
-    filtered: list[tuple[str, str, float]] = []  # (event_type, content, score)
+    filtered: list[tuple[str, str, float, str]] = []  # (event_type, content, score, event_id)
 
     for event in events:
         if not event.created_at:
@@ -139,12 +174,12 @@ def _build_recent_block(events: list) -> str:
         if age_days > _RECENT_MAX_AGE_DAYS:
             continue
 
+        # profile_updated 已在固定块处理，不进入近期块
+        if event.event_type == "profile_updated":
+            continue
+
         # 获取衰减权重
         weight = _EVENT_DECAY_WEIGHTS.get(event.event_type, 0.3)
-
-        # profile_updated 已在固定块处理，不进入近期块
-        if weight == 0.0:
-            continue
 
         # 计算衰减得分
         score = age_days * weight
@@ -163,50 +198,37 @@ def _build_recent_block(events: list) -> str:
         if not content:
             content = f"{event.event_type}: {event.entity_type or ''}"
 
-        filtered.append((event.event_type, content[:120], score))
+        filtered.append((event.event_type, content[:120], score, str(event.id)))
 
     if not filtered:
-        return ""
+        return "", set()
 
     # 按得分排序（越新/越重要越靠前），取前 N 条
     filtered.sort(key=lambda x: x[2])
     top = filtered[:_RECENT_LIMIT]
 
     lines = ["## 近期动态"]
-    for event_type, content, _score in top:
+    event_ids: set[str] = set()
+    for event_type, content, _score, eid in top:
         lines.append(f"- [{event_type}] {content}")
+        event_ids.add(eid)
 
-    return "\n".join(lines)
+    return "\n".join(lines), event_ids
 
 
 async def build_snapshot(user_id: str) -> str:
     """构建 Agent 系统提示快照（分层注入）。
 
-    L0: 固定块（身份/目标/技能/偏好）— 800 字预算
-    L1: 近期块（最近事件，类型衰减过滤）
+    L0: 固定块（身份/目标/技能/偏好）— 800 字预算（读取全量事件）
+    L1: 近期块（最近事件，类型衰减过滤）— 只读 30 天内
     L2: 语义召回 — 由 facade.build_context() 追加
+
+    缓存 5 分钟 TTL，确保 L1 时间窗口准实时。
     """
-    if user_id in _static_cache:
-        return _static_cache[user_id][1]
-
-    async with get_async_session_maker()() as db:
-        # 只读取最近 30 天的事件（近期块 + 固定块所需）
-        from sqlalchemy import select
-
-        cutoff = datetime.now(UTC) - timedelta(days=_RECENT_MAX_AGE_DAYS)
-        stmt = (
-            select(GrowthEvent)
-            .where(GrowthEvent.user_id == user_id)
-            .where(GrowthEvent.created_at >= cutoff)
-            .order_by(GrowthEvent.created_at.desc())
-        )
-        result = await db.execute(stmt)
-        events = list(result.scalars().all())
-
-    if not events:
-        result = "【用户画像为空】"
-        _static_cache[user_id] = (user_id, result)
-        return result
+    # 检查缓存（含 TTL）
+    cached = _static_cache.get(user_id)
+    if cached and (datetime.now(UTC) - cached.created_at) < timedelta(minutes=_CACHE_TTL_MINUTES):
+        return cached.content
 
     from app.backend.memory.projections.events_merger import (
         merge_dict_events,
@@ -214,9 +236,38 @@ async def build_snapshot(user_id: str) -> str:
         merge_skill_events,
     )
 
-    # 按类型分组
+    # ── 查询 1：全量事件（用于 L0 固定块）──
+    async with get_async_session_maker()() as db:
+        stmt_all = select(GrowthEvent).where(GrowthEvent.user_id == user_id).order_by(GrowthEvent.created_at.desc())
+        result_all = await db.execute(stmt_all)
+        all_events = list(result_all.scalars().all())
+
+    # ── 查询 2：最近 30 天事件（用于 L1 近期块）──
+    cutoff = datetime.now(UTC) - timedelta(days=_RECENT_MAX_AGE_DAYS)
+    async with get_async_session_maker()() as db:
+        stmt_recent = (
+            select(GrowthEvent)
+            .where(GrowthEvent.user_id == user_id)
+            .where(GrowthEvent.created_at >= cutoff)
+            .order_by(GrowthEvent.created_at.desc())
+        )
+        result_recent = await db.execute(stmt_recent)
+        recent_events = list(result_recent.scalars().all())
+
+    # 无数据时返回空标记
+    if not all_events:
+        result = "【用户画像为空】"
+        _static_cache[user_id] = _CacheEntry(
+            user_id=user_id,
+            content=result,
+            created_at=datetime.now(UTC),
+            recent_event_ids=set(),
+        )
+        return result
+
+    # 按类型分组（全量事件，用于固定块）
     events_by_type: dict[str, list] = defaultdict(list)
-    for event in events:
+    for event in all_events:
         events_by_type[event.event_type].append(event)
 
     # 固定块数据：只取每个类型最新的（避免累积）
@@ -228,8 +279,8 @@ async def build_snapshot(user_id: str) -> str:
     # L0: 固定块
     fixed_block = _build_fixed_block(profile, goals, skills, preferences)
 
-    # L1: 近期块
-    recent_block = _build_recent_block(events)
+    # L1: 近期块（使用 30 天内事件）
+    recent_block, recent_event_ids = _build_recent_block(recent_events)
 
     # 组装
     parts = [fixed_block]
@@ -237,5 +288,10 @@ async def build_snapshot(user_id: str) -> str:
         parts.append(recent_block)
 
     result = "\n\n".join(parts)
-    _static_cache[user_id] = (user_id, result)
+    _static_cache[user_id] = _CacheEntry(
+        user_id=user_id,
+        content=result,
+        created_at=datetime.now(UTC),
+        recent_event_ids=recent_event_ids,
+    )
     return result

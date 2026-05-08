@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.backend.db.base import get_async_session_maker
 from app.backend.logging_config import get_logger
 from app.backend.memory.projections.markdown import sync_user_md_projection
-from app.backend.memory.projections.snapshot import build_snapshot, invalidate_cache
+from app.backend.memory.projections.snapshot import build_snapshot, get_recent_event_ids, invalidate_cache
 from app.backend.memory.search import MemoryItem, search_all
 from app.backend.memory.stores.relational import GrowthEventRepository
 from app.backend.memory.stores.semantic import SemanticStore
@@ -405,11 +405,14 @@ class LumenMemory:
         """构建 system prompt 记忆上下文。
 
         1. 结构化画像（全量 .md files） — Frozen Snapshot 缓存
-        2. 如果提供 user_input，附加语义相关片段
+        2. 如果提供 user_input，附加语义相关片段（过滤掉已在 L1 中的事件）
 
         输出用 <memory-context> 围栏标签包裹。
         """
         static_ctx = await build_snapshot(user_id)
+
+        # 获取 L1 近期块已包含的事件 ID，避免 L2 语义召回重复
+        recent_ids = get_recent_event_ids(user_id)
 
         dynamic_parts: list[str] = []
         if user_input:
@@ -418,8 +421,12 @@ class LumenMemory:
                 if items:
                     lines = ["【相关记忆（语义检索）】"]
                     for item in items:
+                        # 跳过已在 L1 近期块中的事件（基于 event id 去重）
+                        if item.id in recent_ids:
+                            continue
                         lines.append(f"- {item.content[:300]}")
-                    dynamic_parts.append("\n".join(lines))
+                    if len(lines) > 1:  # 不只是标题行
+                        dynamic_parts.append("\n".join(lines))
             except Exception:
                 pass
 
