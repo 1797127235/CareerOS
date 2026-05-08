@@ -1,28 +1,55 @@
-"""Agent 系统提示快照 — 从 SQLite 直接构建结构化用户画像。
+"""Agent 系统提示快照 — 分层注入（固定块 + 近期块 + 语义召回）。
 
-每轮对话开始时调用 build_snapshot()，注入到 Agent 系统提示。
-不依赖 .md 文件（.md 只用于前端展示），避免投影延迟导致 Agent 看到空数据。
+三层记忆注入：
+- L0 固定块：用户身份、目标、技能、偏好（800 字预算，动态分配）
+- L1 近期块：最近 N 条事件（类型权重过滤）
+- L2 语义召回：由 facade.build_context() 根据 user_input 追加（Cognee→FTS5→.md）
 
 缓存策略：projection flush/sync/rebuild 时由 facade 触发 invalidate_cache() 失效。
 """
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from typing import ClassVar
+from datetime import UTC, datetime, timedelta
 
 from app.backend.db.base import get_async_session_maker
 from app.backend.logging_config import get_logger
-from app.backend.memory.constants import MD_CHAR_LIMITS
-from app.backend.memory.stores.relational import GrowthEventRepository
+from app.backend.models.growth_event import GrowthEvent
 
 logger = get_logger(__name__)
 
-MEMORY_CHAR_LIMIT = MD_CHAR_LIMITS["memory"]
-SKILLS_CHAR_LIMIT = MD_CHAR_LIMITS["skills"]
-EXPERIENCES_CHAR_LIMIT = MD_CHAR_LIMITS["experiences"]
+# ── 配置：固定块预算 ──
+_FIXED_BUDGET = 800  # 字符上限
+_FIXED_ALLOCATION = {
+    "identity": 300,  # profile（学校/专业/年级/目标）
+    "goals": 200,  # 当前目标
+    "skills": 200,  # 技能列表
+    "preferences": 100,  # 偏好（剩余预算）
+}
 
-_static_cache: ClassVar[dict[str, tuple[str, str]]] = {}
+# ── 配置：近期块 ──
+_RECENT_LIMIT = 10  # 取最近 N 条事件
+_RECENT_MAX_AGE_DAYS = 30  # 超过 30 天的事件不进入近期块
+
+# ── 事件类型衰减权重（0.0=不衰减，1.0=最快衰减）──
+# 衰减逻辑：事件年龄（天）* 权重 → 得分，低于阈值时过滤
+_EVENT_DECAY_WEIGHTS: dict[str, float] = {
+    "profile_updated": 0.0,  # 身份：永远注入（固定块处理）
+    "goal_updated": 0.1,  # 目标：缓慢衰减
+    "skill_added": 0.2,  # 技能：中等衰减
+    "skill_level_changed": 0.2,  # 技能变更：中等衰减
+    "preference_learned": 0.3,  # 偏好：中等偏快
+    "status_changed": 0.4,  # 状态：快速衰减
+    "experience_added": 0.5,  # 经历：快速衰减
+    "decision_made": 0.3,  # 决策：中等偏快
+}
+
+# 衰减阈值：得分 > 此值时丢弃
+_DECAY_THRESHOLD = 5.0
+
+_static_cache: dict[str, tuple[str, str]] = {}
 
 
 def invalidate_cache(user_id: str) -> None:
@@ -30,28 +57,151 @@ def invalidate_cache(user_id: str) -> None:
     _static_cache.pop(user_id, None)
 
 
-def _block(label: str, name: str, content: str) -> str:
-    chars = len(content)
-    limit = {"memory": MEMORY_CHAR_LIMIT, "skills": SKILLS_CHAR_LIMIT, "experiences": EXPERIENCES_CHAR_LIMIT}.get(
-        name, 0
-    )
-    pct = int(chars / limit * 100) if limit else 0
-    header = f"══ {label} [{pct}% — {chars:,}/{limit:,} 字符] ══"
-    return f"{header}\n{content.strip()}"
+def _truncate(text: str, limit: int, suffix: str = "…") -> str:
+    """按字符截断文本，保留后缀。"""
+    if len(text) <= limit:
+        return text
+    return text[: limit - len(suffix)] + suffix
+
+
+def _build_fixed_block(
+    profile: dict,
+    goals: dict,
+    skills: dict,
+    preferences: dict,
+) -> str:
+    """构建 L0 固定块（身份 + 目标 + 技能 + 偏好），总预算 800 字。"""
+    parts: list[str] = []
+    budget = _FIXED_BUDGET
+
+    # ── 身份（300 字）──
+    identity_lines: list[str] = []
+    identity_lines.append("## 身份")
+    if profile.get("school_name"):
+        identity_lines.append(f"- 学校：{profile['school_name']}")
+    if profile.get("major"):
+        identity_lines.append(f"- 专业：{profile['major']}")
+    if profile.get("grade"):
+        identity_lines.append(f"- 年级：{profile['grade']}")
+    if profile.get("target_direction"):
+        identity_lines.append(f"- 目标：{profile['target_direction']}")
+    if profile.get("city"):
+        identity_lines.append(f"- 城市：{profile['city']}")
+    identity_text = "\n".join(identity_lines)
+    identity_truncated = _truncate(identity_text, _FIXED_ALLOCATION["identity"])
+    parts.append(identity_truncated)
+    budget -= len(identity_truncated)
+
+    # ── 目标（200 字）──
+    if goals:
+        goals_lines = ["## 目标"]
+        for name, detail in list(goals.items())[:5]:
+            goals_lines.append(f"- {name}：{str(detail)[:60]}")
+        goals_text = "\n".join(goals_lines)
+        goals_truncated = _truncate(goals_text, _FIXED_ALLOCATION["goals"])
+        parts.append(goals_truncated)
+        budget -= len(goals_truncated)
+
+    # ── 技能（200 字）──
+    if skills:
+        skills_lines = ["## 技能"]
+        for name, info in list(skills.items())[:8]:
+            level = info.get("level", "")
+            skills_lines.append(f"- {name}" + (f"（{level}）" if level else ""))
+        skills_text = "\n".join(skills_lines)
+        skills_truncated = _truncate(skills_text, _FIXED_ALLOCATION["skills"])
+        parts.append(skills_truncated)
+        budget -= len(skills_truncated)
+
+    # ── 偏好（剩余预算）──
+    if preferences and budget > 50:
+        pref_lines = ["## 偏好"]
+        for key, value in list(preferences.items())[:5]:
+            pref_lines.append(f"- {key}：{str(value)[:40]}")
+        pref_text = "\n".join(pref_lines)
+        pref_truncated = _truncate(pref_text, max(budget, _FIXED_ALLOCATION["preferences"]))
+        parts.append(pref_truncated)
+
+    return "\n\n".join(parts)
+
+
+def _build_recent_block(events: list) -> str:
+    """构建 L1 近期块：最近事件，按类型衰减过滤。"""
+    now = datetime.now(UTC)
+    filtered: list[tuple[str, str, float]] = []  # (event_type, content, score)
+
+    for event in events:
+        if not event.created_at:
+            continue
+
+        # 计算年龄（天）
+        age_days = (now - event.created_at.replace(tzinfo=UTC)).days
+        if age_days > _RECENT_MAX_AGE_DAYS:
+            continue
+
+        # 获取衰减权重
+        weight = _EVENT_DECAY_WEIGHTS.get(event.event_type, 0.3)
+
+        # profile_updated 已在固定块处理，不进入近期块
+        if weight == 0.0:
+            continue
+
+        # 计算衰减得分
+        score = age_days * weight
+        if score > _DECAY_THRESHOLD:
+            continue
+
+        # 提取内容
+        content = ""
+        if event.payload_json:
+            try:
+                payload = json.loads(event.payload_json)
+                if isinstance(payload, dict):
+                    content = payload.get("content") or payload.get("value") or payload.get("memory_md", "")
+            except json.JSONDecodeError:
+                pass
+        if not content:
+            content = f"{event.event_type}: {event.entity_type or ''}"
+
+        filtered.append((event.event_type, content[:120], score))
+
+    if not filtered:
+        return ""
+
+    # 按得分排序（越新/越重要越靠前），取前 N 条
+    filtered.sort(key=lambda x: x[2])
+    top = filtered[:_RECENT_LIMIT]
+
+    lines = ["## 近期动态"]
+    for event_type, content, _score in top:
+        lines.append(f"- [{event_type}] {content}")
+
+    return "\n".join(lines)
 
 
 async def build_snapshot(user_id: str) -> str:
-    """从 SQLite 直接构建 Agent 系统提示快照。
+    """构建 Agent 系统提示快照（分层注入）。
 
-    查询 growth_events 表合并事件，生成结构化上下文。
-    缓存由 invalidate_cache() 管理，projection 触发时失效。
+    L0: 固定块（身份/目标/技能/偏好）— 800 字预算
+    L1: 近期块（最近事件，类型衰减过滤）
+    L2: 语义召回 — 由 facade.build_context() 追加
     """
     if user_id in _static_cache:
         return _static_cache[user_id][1]
 
     async with get_async_session_maker()() as db:
-        repo = GrowthEventRepository(db)
-        events = await repo.list_by_user(user_id)
+        # 只读取最近 30 天的事件（近期块 + 固定块所需）
+        from sqlalchemy import select
+
+        cutoff = datetime.now(UTC) - timedelta(days=_RECENT_MAX_AGE_DAYS)
+        stmt = (
+            select(GrowthEvent)
+            .where(GrowthEvent.user_id == user_id)
+            .where(GrowthEvent.created_at >= cutoff)
+            .order_by(GrowthEvent.created_at.desc())
+        )
+        result = await db.execute(stmt)
+        events = list(result.scalars().all())
 
     if not events:
         result = "【用户画像为空】"
@@ -59,37 +209,32 @@ async def build_snapshot(user_id: str) -> str:
         return result
 
     from app.backend.memory.projections.events_merger import (
-        generate_experiences_md,
-        generate_memory_md,
-        generate_skills_md,
-        merge_decision_events,
         merge_dict_events,
-        merge_experience_events,
         merge_profile_events,
         merge_skill_events,
     )
 
+    # 按类型分组
     events_by_type: dict[str, list] = defaultdict(list)
     for event in events:
         events_by_type[event.event_type].append(event)
 
+    # 固定块数据：只取每个类型最新的（避免累积）
     profile = merge_profile_events(events_by_type.get("profile_updated", []))
-    skills = merge_skill_events(events_by_type.get("skill_added", []) + events_by_type.get("skill_level_changed", []))
-    experiences = merge_experience_events(events_by_type.get("experience_added", []))
-    preferences = merge_dict_events(events_by_type.get("preference_learned", []))
-    status = merge_dict_events(events_by_type.get("status_changed", []))
     goals = merge_dict_events(events_by_type.get("goal_updated", []))
-    decisions = merge_decision_events(events_by_type.get("decision_made", []))
+    skills = merge_skill_events(events_by_type.get("skill_added", []) + events_by_type.get("skill_level_changed", []))
+    preferences = merge_dict_events(events_by_type.get("preference_learned", []))
 
-    memory_md = generate_memory_md(profile, preferences, status, goals, decisions)
-    skills_md = generate_skills_md(skills)
-    experiences_md = generate_experiences_md(experiences)
+    # L0: 固定块
+    fixed_block = _build_fixed_block(profile, goals, skills, preferences)
 
-    parts = [_block("核心记忆", "memory", memory_md)]
-    if skills:
-        parts.append(_block("技能", "skills", skills_md))
-    if experiences:
-        parts.append(_block("经历", "experiences", experiences_md))
+    # L1: 近期块
+    recent_block = _build_recent_block(events)
+
+    # 组装
+    parts = [fixed_block]
+    if recent_block:
+        parts.append(recent_block)
 
     result = "\n\n".join(parts)
     _static_cache[user_id] = (user_id, result)

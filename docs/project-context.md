@@ -186,6 +186,28 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **必须** 模型名与 provider 都支持在 Settings 页切换，不硬编码
 - **必须** 存 API Key 时去首尾空格
 
+### Memory Injection Rules（分层注入）
+
+三层记忆注入架构（`snapshot.py` + `facade.py`）：
+
+- **L0 固定块**（`build_snapshot()`）：
+  - 身份 300 字 + 目标 200 字 + 技能 200 字 + 偏好剩余（总 800 字上限）
+  - 只读最近 30 天的 `growth_events`
+  - profile_updated 事件衰减权重 0.0（永远注入）
+
+- **L1 近期块**（`build_snapshot()`）：
+  - 最近 10 条非 profile 事件
+  - 类型衰减过滤：`age_days * weight > 5.0` 时丢弃
+  - 权重：goal(0.1) < skill(0.2) < preference(0.3) < status(0.4) < experience(0.5)
+  - 超过 30 天的事件不进入近期块
+
+- **L2 语义召回**（`facade.build_context()`）：
+  - Cognee 语义搜索（limit=5）→ FTS5 全文 → .md 子串兜底
+  - 仅在 `user_input` 非空时触发
+  - 结果注入 `<memory-context>` 围栏
+
+- **缓存**：`build_snapshot()` 结果缓存，由 `invalidate_cache()` 在 projection 时失效
+
 ### Background Review Rules
 
 - **必须** 仅在 `deps.pending_event_ids` 为空（Agent 本轮没调工具）时触发
