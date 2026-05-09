@@ -1,0 +1,356 @@
+import { getUserId } from "./userId";
+
+export type SkillItem = { name: string; level: string; context?: string | null };
+
+export type TargetStatus =
+  | "interested"
+  | "applied"
+  | "test"
+  | "interview"
+  | "offer"
+  | "rejected"
+  | "abandoned";
+
+export type TargetCard = {
+  target_id: string;
+  company: string;
+  title: string;
+  status: TargetStatus;
+  interview_round?: string | null;
+  match_score?: number | null;
+  agent_advice?: string | null;
+  location?: string | null;
+  created_at: string;
+};
+
+export type TargetDetail = TargetCard & {
+  jd_text?: string | null;
+  jd_url?: string | null;
+  salary?: string | null;
+  notes?: string | null;
+};
+
+export type TargetCreatePayload = {
+  company: string;
+  title: string;
+  location?: string | null;
+  salary?: string | null;
+  jd_text?: string | null;
+  jd_url?: string | null;
+  notes?: string | null;
+};
+
+export type TargetUpdatePayload = {
+  company?: string;
+  title?: string;
+  status?: TargetStatus;
+  interview_round?: string | null;
+  location?: string | null;
+  salary?: string | null;
+  notes?: string | null;
+};
+
+export type BoardStats = {
+  total: number;
+  avg_score: number;
+  common_gaps: string[];
+};
+
+export type BoardResponse = {
+  columns: Record<string, TargetCard[]>;
+  stats: BoardStats;
+};
+
+export type ConversationSummary = {
+  conversation_id: string;
+  title: string | null;
+  message_count: number;
+  last_message_at: string | null;
+  created_at: string;
+};
+
+export type MessageItem = {
+  message_id: string;
+  role: "user" | "assistant" | string;
+  content: string | null;
+  intent: string | null;
+  created_at: string;
+};
+
+function statusToZh(status: number): string {
+  if (status === 401 || status === 403) return "让我先认识一下你.";
+  if (status === 404) return "这条记录没找到.";
+  if (status >= 500) return "我刚才走神了,你再问我一遍.";
+  return "信号断了一下,你再发一次试试?";
+}
+
+async function http<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    let detail = statusToZh(res.status);
+    try {
+      const data = await res.json();
+      if (typeof data?.detail === "string") detail = data.detail;
+    } catch {
+      // ignore — keep default
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function getMemoryContent(): Promise<{ content: string }> {
+  return http<{ content: string }>(
+    `/api/memory/me?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export function resetMemory(): Promise<{ deleted: number }> {
+  return http<{ deleted: number }>(
+    `/api/memory/reset?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "POST" },
+  );
+}
+
+export function getBoard(): Promise<BoardResponse> {
+  return http<BoardResponse>(
+    `/api/targets/board?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export function getTarget(targetId: string): Promise<TargetDetail> {
+  return http<TargetDetail>(
+    `/api/targets/${encodeURIComponent(targetId)}?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+/** 排队后台重新生成行动建议；返回当前详情，需轮询 getTarget 直至 agent_advice 更新 */
+export function regenerateTargetAdvice(targetId: string): Promise<TargetDetail> {
+  return http<TargetDetail>(
+    `/api/targets/${encodeURIComponent(targetId)}/regenerate-advice?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "POST" },
+  );
+}
+
+export function createTarget(payload: TargetCreatePayload): Promise<TargetDetail> {
+  return http<TargetDetail>(
+    `/api/targets?user_id=${encodeURIComponent(getUserId())}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function updateTarget(
+  targetId: string,
+  patch: TargetUpdatePayload,
+): Promise<TargetDetail> {
+  return http<TargetDetail>(
+    `/api/targets/${encodeURIComponent(targetId)}?user_id=${encodeURIComponent(getUserId())}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export function deleteTarget(targetId: string): Promise<{ deleted: boolean }> {
+  return http<{ deleted: boolean }>(
+    `/api/targets/${encodeURIComponent(targetId)}?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "DELETE" },
+  );
+}
+
+export function getChatHistory(limit = 20): Promise<ConversationSummary[]> {
+  return http<ConversationSummary[]>(
+    `/api/chat/history?user_id=${encodeURIComponent(getUserId())}&limit=${limit}`,
+  );
+}
+
+export function getConversation(conversation_id: string): Promise<MessageItem[]> {
+  return http<MessageItem[]>(
+    `/api/chat/${encodeURIComponent(conversation_id)}?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export function deleteConversation(conversation_id: string): Promise<{ deleted: boolean }> {
+  return http<{ deleted: boolean }>(
+    `/api/chat/${encodeURIComponent(conversation_id)}?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "DELETE" },
+  );
+}
+
+// ── Chat SSE ──
+
+export type SSEChatHandlers = {
+  onToken: (delta: string, conversationId: string) => void
+  onDone: (conversationId: string, usage?: { input: number; output: number }) => void
+  onTrace: (kind: 'call' | 'result', tool: string, content: string) => void
+  onError: (message: string) => void
+  signal?: AbortSignal
+}
+
+export async function chatStream(
+  message: string,
+  conversation_id: string | null,
+  h: SSEChatHandlers,
+): Promise<void> {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: h.signal,
+    body: JSON.stringify({
+      message,
+      conversation_id: conversation_id ?? undefined,
+      user_id: getUserId(),
+    }),
+  })
+
+  if (!res.ok || !res.body) {
+    h.onError(statusToZh(res.status))
+    return
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const raw = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const line = raw.split('\n').find((l) => l.startsWith('data:'))
+      if (!line) continue
+      const payload = line.slice(5).trim()
+      if (!payload) continue
+
+      let ev: Record<string, unknown>
+      try { ev = JSON.parse(payload) } catch { continue }
+
+      switch (ev.type) {
+        case 'token':
+          h.onToken(String(ev.content ?? ''), String(ev.conversation_id ?? ''))
+          break
+        case 'trace':
+          h.onTrace(
+            String(ev.kind ?? 'call') as 'call' | 'result',
+            String(ev.tool ?? ''),
+            String(ev.content ?? ''),
+          )
+          break
+        case 'done':
+          h.onDone(
+            String(ev.conversation_id ?? ''),
+            ev.usage as { input: number; output: number } | undefined,
+          )
+          break
+        case 'error':
+          h.onError(String(ev.message ?? '未知错误'))
+          break
+      }
+    }
+  }
+}
+
+// ── Config ──
+
+export type Config = {
+  // LLM
+  llm_provider: string;
+  llm_model: string;
+  llm_api_key: string;
+  llm_base_url: string;
+  has_llm_key: boolean;
+
+  // Embedding
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_api_key: string;
+  embedding_base_url: string;
+  has_embedding_key: boolean;
+
+  // 旧字段（向后兼容）
+  dashscope_api_key: string;
+  has_api_key: boolean;
+};
+
+export type ConfigTestResponse = {
+  ok: boolean;
+  latency_ms: number;
+  error: string;
+};
+
+export async function getConfig(): Promise<Config> {
+  return http<Config>("/api/config");
+}
+
+export async function updateConfig(data: Partial<Config>): Promise<Config> {
+  return http<Config>("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testConfig(data: {
+  provider: string;
+  model: string;
+  api_key: string;
+  base_url?: string;
+}): Promise<ConfigTestResponse> {
+  return http<ConfigTestResponse>("/api/config/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export type ProviderCatalog = Record<
+  string,
+  { name: string; baseUrl: string; models: string[]; embeddingModels: string[] }
+>;
+
+export async function getProviders(): Promise<ProviderCatalog> {
+  return http<ProviderCatalog>("/api/config/providers");
+}
+
+// ── Memory ──
+
+export type MemoryStats = {
+  status: string; // "ready" | "no_api_key" | "error" | "not_initialized"
+  count: number;
+};
+
+export function getMemoryStats(): Promise<MemoryStats> {
+  return http<MemoryStats>(
+    `/api/memory/stats?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export type MemoryItem = {
+  id: string;
+  memory: string;
+  created_at: string | null;
+  categories: string[];
+};
+
+export function getMemoryList(): Promise<MemoryItem[]> {
+  return http<MemoryItem[]>(
+    `/api/memory/list?user_id=${encodeURIComponent(getUserId())}`,
+  );
+}
+
+export function deleteMemory(id: string): Promise<{ deleted: string }> {
+  return http<{ deleted: string }>(
+    `/api/memory/${encodeURIComponent(id)}?user_id=${encodeURIComponent(getUserId())}`,
+    { method: "DELETE" },
+  );
+}

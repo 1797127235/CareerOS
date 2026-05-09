@@ -69,3 +69,11 @@ htmlcov/
 # BMAD-METHOD
 _bmad-output/
 _bmad/_memory/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Node
+node_modules/
+
