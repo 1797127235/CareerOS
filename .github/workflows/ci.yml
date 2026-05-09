@@ -30,28 +30,25 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Ruff lint
-        run: ruff check app/
+        run: ruff check backend/
 
       - name: Ruff format
-        run: ruff format app/
+        run: ruff format backend/
 
       - name: Ruff format check
-        run: ruff format --check app/
+        run: ruff format --check backend/
 
       - name: Run tests
         run: pytest
 
       - name: Byte-compile backend
-        run: python -m compileall -q app/backend
+        run: python -m compileall -q backend/
 
       - name: Smoke import app
-        run: python -c "from app.backend.main import app; assert app.title"
+        run: python -c "from backend.main import app; assert app.title"
 
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app/frontend
     steps:
       - uses: actions/checkout@v4
 
