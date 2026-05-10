@@ -1,8 +1,9 @@
 """统一搜索层 — 从多个存储源召回记忆。
 
-优先级：Cognee 语义 → SQLite FTS5 全文 → .md 子串兜底
+优先级：Cognee 语义 → SQLite FTS5 全文
 
-从 lumen_memory.recall() 提取。"""
+不再使用 .md 子串兜底 — 同一数据已在 FTS5 和 Cognee 中有索引，
+.md 是第三份副本，兜底意味着主流程不完善。"""
 
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ from sqlalchemy import text
 from backend.db import get_async_session_maker
 from backend.logging_config import get_logger
 from backend.memory.datasets import ALL_DATASETS
-from backend.memory.markdown import read_experiences, read_memory, read_skills
 
 logger = get_logger(__name__)
 
@@ -49,7 +49,6 @@ async def search_all(
     if include_cognee:
         results.extend(await _search_cognee(query, limit, seen, datasets=datasets))
     results.extend(await _search_fts5(user_id, query, limit, seen))
-    results.extend(await _search_md(user_id, query, seen))
 
     return results[:limit]
 
@@ -145,40 +144,3 @@ def _fts_query(table_name: str):
         ORDER BY ge.created_at DESC
         LIMIT :lim
     """)
-
-
-async def _search_md(user_id: str, query: str, seen: set[str]) -> list[MemoryItem]:
-    """.md 文件子串搜索（兜底）。"""
-    results: list[MemoryItem] = []
-    try:
-        for md_name, md_reader in [
-            ("memory.md", read_memory),
-            ("skills.md", read_skills),
-            ("experiences.md", read_experiences),
-        ]:
-            content = md_reader(user_id)
-            if query.lower() not in content.lower():
-                continue
-            file_id = f"md:{md_name}"
-            if file_id in seen:
-                continue
-            seen.add(file_id)
-            lines = content.split("\n")
-            relevant: list[str] = []
-            for idx, line in enumerate(lines):
-                if query.lower() in line.lower():
-                    start = max(0, idx - 2)
-                    end = min(len(lines), idx + 3)
-                    relevant.extend(lines[start:end])
-                    relevant.append("---")
-            unique = list(dict.fromkeys(relevant))
-            results.append(
-                MemoryItem(
-                    id=file_id,
-                    content="\n".join(unique)[:500],
-                    categories=[md_name.replace(".md", "")],
-                )
-            )
-    except Exception as exc:
-        logger.warning(".md search fallback failed", error=str(exc))
-    return results

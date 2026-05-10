@@ -8,8 +8,8 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from backend.models import GrowthEvent
-from backend.schemas import (
+from backend.domain.models import GrowthEvent
+from backend.domain.schemas import (
     DecisionPayload,
     ExperiencePayload,
     KeyValuePayload,
@@ -259,55 +259,83 @@ def generate_memory_md(
     return "\n".join(parts)
 
 
-def generate_skills_md(skills: dict[str, dict]) -> str:
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 技能列表", ""]
-    parts.append("> 记录用户的技能状态，用于能力评估和学习建议。")
-    parts.append("")
-    if skills:
-        parts.append("## 已掌握技能")
-        for skill_name, skill_info in skills.items():
-            parts.append(f"### {skill_name}")
-            parts.append(f"- 状态：{skill_info.get('level', 'familiar')}")
-            if skill_info.get("context"):
-                parts.append(f"- 备注：{skill_info['context']}")
-            parts.append("")
-    parts.append(f"---\n*最后更新：{date_str}*")
-    return "\n".join(parts)
+def _build_skills_section(skills: dict[str, dict]) -> str:
+    """构建技能章节（合并到 memory.md）。"""
+    if not skills:
+        return ""
+    lines = ["## 技能"]
+    for skill_name, skill_info in skills.items():
+        level = skill_info.get("level", "familiar")
+        lines.append(f"- **{skill_name}**（{level}）")
+        if skill_info.get("context"):
+            lines.append(f"  - {skill_info['context'][:80]}")
+    return "\n".join(lines)
 
 
-def generate_experiences_md(experiences: list[dict]) -> str:
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 经历列表", ""]
-    parts.append("> 记录用户的项目、实习、竞赛和其它成长经历。")
-    parts.append("")
-    for exp in experiences:
+def _build_experiences_section(experiences: list[dict]) -> str:
+    """构建经历章节（合并到 memory.md），最多 5 条。"""
+    if not experiences:
+        return ""
+    lines = ["## 经历"]
+    for exp in experiences[:5]:
         title = exp.get("title") or exp.get("name") or exp.get("company") or "未命名经历"
-        parts.append(f"### {title}")
+        lines.append(f"- **{title}**")
         if exp.get("period"):
-            parts.append(f"- 时间：{exp['period']}")
-        elif exp.get("time"):
-            parts.append(f"- 时间：{exp['time']}")
+            lines.append(f"  - {exp['period']}")
         if exp.get("role"):
-            parts.append(f"- 角色：{exp['role']}")
+            lines.append(f"  - {exp['role']}")
         if exp.get("tech_stack"):
-            parts.append(f"- 技术栈：{exp['tech_stack']}")
+            lines.append(f"  - {exp['tech_stack']}")
         if exp.get("description"):
-            parts.append(f"- 描述：{exp['description']}")
-        parts.append("")
-    parts.append(f"---\n*最后更新：{date_str}*")
-    return "\n".join(parts)
+            lines.append(f"  - {exp['description'][:60]}")
+    return "\n".join(lines)
+
+
+def _build_documents_section(documents: list[dict]) -> str:
+    """构建已上传文件章节（合并到 memory.md），最多 5 条。"""
+    if not documents:
+        return ""
+    lines = ["## 已上传文件"]
+    for doc in documents[:5]:
+        size_kb = doc["size_bytes"] / 1024
+        lines.append(f"- {doc['filename']}（{doc['file_type']}，{size_kb:.0f}KB）")
+    return "\n".join(lines)
+
+
+def merge_document_events(events: list) -> list[dict]:
+    """合并文件上传事件，返回文档列表（按上传时间倒序，SHA256 去重）。"""
+    docs = []
+    seen_hashes: set[str] = set()
+    for event in reversed(events):
+        payload = load_payload(event)
+        h = payload.get("file_hash", "")
+        if h in seen_hashes:
+            continue
+        seen_hashes.add(h)
+        docs.append(
+            {
+                "filename": payload.get("filename", ""),
+                "file_type": payload.get("file_type", ""),
+                "size_bytes": payload.get("size_bytes", 0),
+                "chunk_count": payload.get("chunk_count", 0),
+                "preview": payload.get("preview", ""),
+                "uploaded_at": str(event.created_at) if hasattr(event, "created_at") else "",
+            }
+        )
+    return list(reversed(docs))
 
 
 __all__ = [
+    "_build_documents_section",
+    "_build_experiences_section",
+    "_build_skills_section",
     "deep_merge",
     "extract_profile_fields",
-    "generate_experiences_md",
     "generate_memory_md",
-    "generate_skills_md",
     "load_payload",
     "merge_decision_events",
     "merge_dict_events",
+    "merge_document_events",
     "merge_experience_events",
     "merge_profile_events",
     "merge_skill_events",

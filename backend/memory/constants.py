@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-# .md 文件字符限制（markdown.py 和 snapshot.py 共用）
+# .md 文件字符限制
 MD_CHAR_LIMITS: dict[str, int] = {
-    "memory": 4000,
-    "skills": 3000,
-    "experiences": 5000,
+    "memory": 8000,  # 合并后综合画像总上限
+    "about_you": 2000,  # AI 生成画像
+    "patterns": 2000,  # 模式洞察（预留）
 }

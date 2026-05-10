@@ -12,25 +12,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import USER_DATA_DIR
 from backend.db import get_async_session_maker
+from backend.domain.models import GrowthEvent
 from backend.logging_config import get_logger
 from backend.memory.constants import MD_CHAR_LIMITS
 from backend.memory.events_merger import (
-    generate_experiences_md,
+    _build_documents_section,
+    _build_experiences_section,
+    _build_skills_section,
     generate_memory_md,
-    generate_skills_md,
     merge_decision_events,
     merge_dict_events,
+    merge_document_events,
     merge_experience_events,
     merge_profile_events,
     merge_skill_events,
 )
-from backend.models import GrowthEvent
 
 logger = get_logger(__name__)
 
 MEMORY_CHAR_LIMIT = MD_CHAR_LIMITS["memory"]
-SKILLS_CHAR_LIMIT = MD_CHAR_LIMITS["skills"]
-EXPERIENCES_CHAR_LIMIT = MD_CHAR_LIMITS["experiences"]
+COMBINED_TOTAL_LIMIT = sum(MD_CHAR_LIMITS.values())  # ~14000，合并后总上限
 
 _BASE_MEMORY_DIR = USER_DATA_DIR / "memory"
 
@@ -48,6 +49,7 @@ def memory_default() -> str:
     return """# 用户核心记忆
 
 > 这个文件由 AI 自动管理，记录用户的核心信息。
+> 每次对话开始时会自动注入到 system prompt。
 
 ## 基础信息
 - 学校：（待填写）
@@ -65,25 +67,11 @@ def memory_default() -> str:
 - 正在准备：（待填写）
 - 焦虑程度：（待填写）
 
----
-*最后更新：待填写*
-"""
+## 技能
+_暂无记录_
 
-
-def skills_default() -> str:
-    return """# 技能列表
-
-> 记录用户的技能状态，用于能力评估和学习建议。
-
----
-*最后更新：待填写*
-"""
-
-
-def experiences_default() -> str:
-    return """# 经历列表
-
-> 记录用户的项目、实习、竞赛和其它成长经历。
+## 经历
+_暂无记录_
 
 ---
 *最后更新：待填写*
@@ -100,30 +88,6 @@ def read_memory(user_id: str) -> str:
 def write_memory(user_id: str, content: str) -> None:
     ensure_memory_dirs(user_id)
     (memory_dir(user_id) / "memory.md").write_text(content, encoding="utf-8")
-
-
-def read_skills(user_id: str) -> str:
-    skills_file = memory_dir(user_id) / "skills.md"
-    if not skills_file.exists():
-        return ""
-    return skills_file.read_text(encoding="utf-8")
-
-
-def write_skills(user_id: str, content: str) -> None:
-    ensure_memory_dirs(user_id)
-    (memory_dir(user_id) / "skills.md").write_text(content, encoding="utf-8")
-
-
-def read_experiences(user_id: str) -> str:
-    exp_file = memory_dir(user_id) / "experiences.md"
-    if not exp_file.exists():
-        return ""
-    return exp_file.read_text(encoding="utf-8")
-
-
-def write_experiences(user_id: str, content: str) -> None:
-    ensure_memory_dirs(user_id)
-    (memory_dir(user_id) / "experiences.md").write_text(content, encoding="utf-8")
 
 
 def _truncate_to_limit(content: str, limit: int, *, keep_tail: bool = False) -> str:
@@ -155,10 +119,7 @@ def _write_md_file_safe(path: str, content: str, max_chars: int | None = None, *
 
 def _write_default_md_snapshot(user_id: str) -> None:
     ensure_memory_dirs(user_id)
-    d = memory_dir(user_id)
-    _write_md_file_safe(str(d / "memory.md"), memory_default())
-    _write_md_file_safe(str(d / "skills.md"), skills_default())
-    _write_md_file_safe(str(d / "experiences.md"), experiences_default())
+    _write_md_file_safe(str(memory_dir(user_id) / "memory.md"), memory_default())
 
 
 async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
@@ -190,20 +151,30 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
         ensure_memory_dirs(user_id)
         d = memory_dir(user_id)
 
-        _write_md_file_safe(
-            str(d / "memory.md"),
-            generate_memory_md(profile, preferences, status, goals, decisions),
-            max_chars=MEMORY_CHAR_LIMIT,
-        )
-        _write_md_file_safe(
-            str(d / "skills.md"), generate_skills_md(skills), max_chars=SKILLS_CHAR_LIMIT, keep_tail=True
-        )
-        _write_md_file_safe(
-            str(d / "experiences.md"),
-            generate_experiences_md(experiences),
-            max_chars=EXPERIENCES_CHAR_LIMIT,
-            keep_tail=True,
-        )
+        # 构建各章节
+        core = generate_memory_md(profile, preferences, status, goals, decisions)
+        skills_section = _build_skills_section(skills)
+        exp_section = _build_experiences_section(experiences)
+
+        doc_events = [e for e in events if e.event_type == "document_uploaded"]
+        docs_section = ""
+        if doc_events:
+            documents = merge_document_events(doc_events)
+            docs_section = _build_documents_section(documents)
+
+        # 拼接为一个 memory.md
+        combined = core
+        for section in [skills_section, exp_section, docs_section]:
+            if section:
+                combined += "\n\n" + section
+
+        _write_md_file_safe(str(d / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
+
+        # 清理历史 .md 碎片文件（迁移后不再使用）
+        for legacy in ("skills.md", "experiences.md", "documents.md", "patterns.md"):
+            p = d / legacy
+            if p.exists():
+                p.unlink(missing_ok=True)
 
         entities_dir = d / "entities"
         if entities_dir.exists():
@@ -229,6 +200,22 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
     except Exception as exc:
         logger.error(".md projection failed", user_id=user_id, error=str(exc))
         return False
+
+
+def read_about_you(user_id: str) -> str:
+    path = memory_dir(user_id) / "about_you.md"
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def write_about_you(user_id: str, content: str) -> None:
+    ensure_memory_dirs(user_id)
+    _write_md_file_safe(
+        str(memory_dir(user_id) / "about_you.md"),
+        content,
+        max_chars=MD_CHAR_LIMITS.get("about_you", 2000),
+    )
 
 
 async def sync_user_md_projection(user_id: str) -> bool:

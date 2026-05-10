@@ -17,13 +17,13 @@ from typing import TypedDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import get_async_session_maker
+from backend.domain.models import GrowthEvent
 from backend.logging_config import get_logger
 from backend.memory.markdown import sync_user_md_projection
 from backend.memory.relational_store import GrowthEventRepository
 from backend.memory.search import MemoryItem, search_all
 from backend.memory.semantic_store import SemanticStore
 from backend.memory.snapshot import build_snapshot, get_recent_event_ids, invalidate_cache
-from backend.models import GrowthEvent
 
 logger = get_logger(__name__)
 
@@ -133,6 +133,21 @@ class LumenMemory:
                 await self.flush_projections(user_id, [str(e.id) for e in created])
             return created
 
+    async def _update_understanding(self, user_id: str) -> None:
+        """后台异步：更新 AI 综合画像。
+
+        写入 about_you.md 后使快照缓存失效，
+        确保下一次 build_snapshot 读取到最新画像。
+        """
+        try:
+            from backend.memory.understanding import update_ai_understanding
+
+            await update_ai_understanding(user_id)
+            # about_you.md 已落盘，令下次 build_snapshot 重新读取
+            invalidate_cache(user_id)
+        except Exception as exc:
+            logger.warning("AI understanding update skipped", user_id=user_id, error=str(exc))
+
     async def flush_projections(self, user_id: str, event_ids: list[str] | None = None) -> None:
         """同步 .md 文件 + 异步投 Cognee。自开 session 路径调用。"""
         await sync_user_md_projection(user_id)
@@ -141,6 +156,9 @@ class LumenMemory:
             task = asyncio.create_task(self._sync_cognee(event_ids, user_id=user_id))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
+            task2 = asyncio.create_task(self._update_understanding(user_id))
+            _background_tasks.add(task2)
+            task2.add_done_callback(_background_tasks.discard)
 
     async def sync_projections(self, user_id: str, event_ids: list[str] | None = None) -> None:
         """外部 db 路径专用。调用方 commit 后调用。"""
@@ -150,6 +168,9 @@ class LumenMemory:
             task = asyncio.create_task(self._sync_cognee(event_ids, user_id=user_id))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
+            task2 = asyncio.create_task(self._update_understanding(user_id))
+            _background_tasks.add(task2)
+            task2.add_done_callback(_background_tasks.discard)
 
     async def _sync_cognee(self, event_ids: list[str], user_id: str | None = None) -> None:
         """后台异步：将事件文本投影到 Cognee。"""
@@ -266,9 +287,11 @@ class LumenMemory:
         return {"deleted": deleted, "index_cleared": index_cleared}
 
     async def delete_event(self, user_id: str, event_id: str) -> tuple[bool, str | None]:
-        """删除单条事件并重建 FTS 索引 + .md 投影。"""
-        from sqlalchemy import text
+        """删除单条事件，FTS5 触发器自动增量更新索引。
 
+        不再全量重建 FTS — AFTER DELETE 触发器已处理增量删除。
+        仅当 FTS 损坏时才需要 rebuild_fts_index()。
+        """
         async with get_async_session_maker()() as db:
             event = await db.get(GrowthEvent, event_id)
 
@@ -277,11 +300,8 @@ class LumenMemory:
             if event.user_id != user_id:
                 return False, "无权删除该记忆"
 
-            repo = GrowthEventRepository(db)
             try:
-                await repo.drop_fts_triggers()
-                await db.execute(text("DELETE FROM growth_events WHERE id = :id"), {"id": event_id})
-                await repo.rebuild_fts_index()
+                await db.delete(event)
                 await db.commit()
             except Exception:
                 await db.rollback()
@@ -304,11 +324,21 @@ class LumenMemory:
         from sqlalchemy import delete, select
         from sqlalchemy import func as _func
 
+        from backend.memory.relational_store import GrowthEventRepository
+
         async with get_async_session_maker()() as db:
             result = await db.execute(select(_func.count(GrowthEvent.id)).where(GrowthEvent.user_id == user_id))
             count = result.scalar() or 0
+
+            # 先禁用触发器，避免 FTS 表缺失导致删除失败
+            store = GrowthEventRepository(db)
+            await store.drop_fts_triggers()
+
             await db.execute(delete(GrowthEvent).where(GrowthEvent.user_id == user_id))
             await db.commit()
+
+            # 重建 FTS（表为空，触发器也重建）
+            await store.rebuild_fts_index()
 
         # 同步 .md 到空状态
         await sync_user_md_projection(user_id)
@@ -404,14 +434,17 @@ class LumenMemory:
     async def build_context(self, user_id: str, user_input: str | None = None) -> str:
         """构建 system prompt 记忆上下文。
 
-        1. 分层注入快照（build_snapshot）— L0 固定块 + L1 近期块，5 分钟 TTL 缓存
-        2. 如果提供 user_input，附加语义相关片段（过滤掉已在 L1 中的事件）
+        1. 分层注入快照（build_snapshot）— L0 固定块 + L1 近期对话上下文，5 分钟 TTL 缓存
+        2. 如果提供 user_input，附加语义相关片段（L2 与 L1 数据源不同，无需去重）
 
+        L0（GrowthEvent 聚合）和 L1（Conversation 摘要）使用不同数据源，
+        因此物理上不可能出现同一信息以聚合态和原始态重复注入。
         输出用 <memory-context> 围栏标签包裹。
         """
         static_ctx = await build_snapshot(user_id)
 
-        # 获取 L1 近期块已包含的事件 ID，避免 L2 语义召回重复
+        # L2 语义召回：L2 数据源（GrowthEvent 向量/FTS5）与 L1（Conversation）不同，
+        # 不会重复，但保留 recent_ids 过滤以防极端情况。
         recent_ids = get_recent_event_ids(user_id)
 
         dynamic_parts: list[str] = []
@@ -421,7 +454,8 @@ class LumenMemory:
                 if items:
                     lines = ["【相关记忆（语义检索）】"]
                     for item in items:
-                        # 跳过已在 L1 近期块中的事件（基于 event id 去重）
+                        # L2 item.id 是 event/cognee hash，L1 recent_ids 是 conv id，
+                        # 不会碰撞，此过滤仅作为防御性检查。
                         if item.id in recent_ids:
                             continue
                         lines.append(f"- {item.content[:300]}")
