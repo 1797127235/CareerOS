@@ -1,12 +1,14 @@
-"""画像工具 — get_profile + update_profile。"""
+"""画像工具 — get_profile + update_profile（统一 Tool 接口版）。"""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import RunContext
 
 from backend.agent.deps import LumenDeps
+from backend.agent.tools.base import Tool, ToolResult
 from backend.domain.schemas import ProfilePayload
 from backend.logging_config import get_logger
 from backend.memory import get_memory
@@ -14,23 +16,41 @@ from backend.memory import get_memory
 logger = get_logger(__name__)
 
 
-def register(agent: Agent[LumenDeps, str]) -> None:
-    @agent.tool
-    async def get_profile(ctx: RunContext[LumenDeps]) -> str:
-        """获取用户完整画像（通常无需主动调用，画像已在 system prompt 中）。"""
+class GetProfileTool(Tool):
+    """获取用户画像。通常无需主动调用，画像已在 system prompt 中。"""
+
+    name = "get_profile"
+    is_read_only = True
+    description = "获取用户完整画像。通常无需主动调用，画像已在 system prompt 中。"
+
+    async def call(self, ctx: RunContext[LumenDeps]) -> ToolResult:
         logger.info("Tool call: get_profile", user_id=ctx.deps.user_id)
 
         if ctx.deps.build_context_cache.strip():
-            return _strip_context_tags(ctx.deps.build_context_cache)
+            return ToolResult.ok(_strip_context_tags(ctx.deps.build_context_cache))
 
         memory_instance = get_memory()
         context = await memory_instance.build_context(ctx.deps.user_id)
         if context.strip():
-            return _strip_context_tags(context)
-        return "用户画像为空，请先上传简历或手动填写画像。"
+            return ToolResult.ok(_strip_context_tags(context))
 
-    @agent.tool
-    async def update_profile(
+        return ToolResult.ok("用户画像为空，请先上传简历或手动填写画像。")
+
+
+class UpdateProfileTool(Tool):
+    """更新用户画像。只传有值的字段，传 None 的会被忽略。"""
+
+    name = "update_profile"
+    is_read_only = False
+    description = (
+        "更新用户画像。只传有值的字段。"
+        "可用字段: school_name, major, grade, graduation_year, school_level, "
+        "target_direction, target_company_level, city, gpa, ranking, awards, bio, "
+        "english_level, expected_salary"
+    )
+
+    async def call(
+        self,
         ctx: RunContext[LumenDeps],
         school_name: str | None = None,
         major: str | None = None,
@@ -46,28 +66,7 @@ def register(agent: Agent[LumenDeps, str]) -> None:
         bio: str | None = None,
         english_level: str | None = None,
         expected_salary: str | None = None,
-    ) -> str:
-        """更新用户画像。只传有值的字段，传 None 的会被忽略。
-
-        可用字段及含义：
-        - school_name: 学校名称
-        - major: 专业
-        - grade: 年级（大一/大二/大三/大四/研一/研二/研三）
-        - graduation_year: 毕业年份
-        - school_level: 学校层次（985/211/双一流/普通本科/专科）
-        - target_direction: 职业目标方向（如：后端开发/AI算法/前端开发/产品经理）
-        - target_company_level: 目标公司层次（大厂/中厂/小厂/创业公司/无所谓）
-        - city: 意向城市
-        - gpa: GPA
-        - ranking: 排名
-        - awards: 获奖列表
-        - bio: 个人简介
-        - english_level: 英语水平（CET4/CET6/雅思/托福/无）
-        - expected_salary: 期望薪资
-
-        例：用户说「我在清华读大二，想做大厂AI算法」
-          → update_profile(school_name='清华大学', grade='大二', target_direction='AI算法', target_company_level='大厂')"""
-
+    ) -> ToolResult:
         fields: dict[str, Any] = {}
         for name, val in [
             ("school_name", school_name),
@@ -89,7 +88,7 @@ def register(agent: Agent[LumenDeps, str]) -> None:
                 fields[name] = val
 
         if not fields:
-            return "没有需要更新的字段。"
+            return ToolResult.ok("没有需要更新的字段。")
 
         allowed_keys = set(ProfilePayload.model_fields.keys())
         known = {k: v for k, v in fields.items() if k in allowed_keys}
@@ -100,7 +99,7 @@ def register(agent: Agent[LumenDeps, str]) -> None:
         try:
             validated = ProfilePayload.model_validate(known)
         except Exception as e:
-            return f"画像字段校验失败：{e}"
+            return ToolResult.fail(f"画像字段校验失败：{e}", error_code="VALIDATION_ERROR")
 
         memory = get_memory()
         event = await memory.remember(
@@ -114,14 +113,14 @@ def register(agent: Agent[LumenDeps, str]) -> None:
         )
         if event and event.id is not None:
             ctx.deps.pending_event_ids.append(str(event.id))
-            ctx.deps.build_context_cache = ""  # 写入后使缓存失效
-            return f"画像已更新：{', '.join(validated.model_dump(exclude_none=True).keys())}"
-        return "画像内容没有变化，跳过更新。"
+            ctx.deps.build_context_cache = ""
+            updated_keys = ", ".join(validated.model_dump(exclude_none=True).keys())
+            return ToolResult.ok(f"画像已更新：{updated_keys}", event_id=str(event.id))
+
+        return ToolResult.ok("画像内容没有变化，跳过更新。")
 
 
 def _strip_context_tags(text: str) -> str:
-    """去除 <memory-context> 包裹标签，避免向 LLM 暴露隔离机制。"""
-    import re
-
+    """去除 <memory-context> 包裹标签。"""
     text = re.sub(r"^<memory-context>\n\[System note:[^\]]*\]\n", "", text)
     return text.removesuffix("\n</memory-context>")

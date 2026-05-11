@@ -6,8 +6,7 @@ from pydantic_ai import Agent
 
 from backend.agent.deps import LumenDeps
 from backend.agent.pydantic_agent import _create_model
-from backend.agent.tools.tool_memory_save import register as register_memory_save
-from backend.agent.tools.tool_profile import register as register_profile
+from backend.agent.tools.registry import get_registry
 from backend.config import get_settings
 from backend.db import get_async_session_maker
 from backend.domain.models import UploadedFile
@@ -58,8 +57,9 @@ def _get_extract_agent() -> Agent[LumenDeps, str]:
         retries=2,
     )
 
-    register_memory_save(agent)
-    register_profile(agent)
+    # 注册提取 Agent 需要的工具（只注册 memory_save 和 update_profile）
+    registry = get_registry()
+    registry.register_selective(agent, ["memory_save", "update_profile"])
     return agent
 
 

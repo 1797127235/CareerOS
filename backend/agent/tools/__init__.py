@@ -1,23 +1,23 @@
-"""Agent 工具模块。"""
+"""Agent 工具模块 — 统一工具系统入口。
 
-from pydantic_ai import Agent
+使用方式：
+  from backend.agent.tools import register_all_tools
+  register_all_tools(agent)
 
-from backend.agent.deps import LumenDeps
-from backend.agent.tools.tool_memory_save import register as register_memory_save
-from backend.agent.tools.tool_memory_search import register as register_memory_search
-from backend.agent.tools.tool_profile import register as register_profile
+内部通过 ToolRegistry 自动发现并注册所有工具（内置 + MCP 桥接）。
+"""
 
+from backend.agent.tools.internal.memory_save import MemorySaveTool
 
-def register_all_tools(agent: Agent[LumenDeps, str]) -> None:
-    """注册所有 Agent 工具。"""
-    register_memory_search(agent)
-    register_memory_save(agent)
-    register_profile(agent)
-
+# 向后兼容：保留旧的显式导入路径
+from backend.agent.tools.internal.memory_search import MemorySearchTool
+from backend.agent.tools.internal.profile import GetProfileTool, UpdateProfileTool
+from backend.agent.tools.registry import register_all_tools
 
 __all__ = [
     "register_all_tools",
-    "register_memory_search",
-    "register_memory_save",
-    "register_profile",
+    "MemorySearchTool",
+    "MemorySaveTool",
+    "GetProfileTool",
+    "UpdateProfileTool",
 ]
