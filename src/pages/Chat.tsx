@@ -65,12 +65,13 @@ export default function Chat() {
 
         {messages.map((message, index) =>
           message.role === 'assistant' ? (
-            <AssistantBubble
+              <AssistantBubble
               key={message.id}
               text={message.content}
               streaming={streaming && index === messages.length - 1}
               usage={message.usage}
               traces={message.traces}
+              tokens_used={message.tokens_used}
             />
           ) : (
             <UserBubble key={message.id} text={message.content} />
@@ -108,11 +109,13 @@ function AssistantBubble({
   streaming,
   usage,
   traces,
+  tokens_used,
 }: {
   text: string
   streaming: boolean
   usage?: { input: number; output: number }
   traces?: import('../lib/chatSession').TraceEntry[]
+  tokens_used?: number
 }) {
   const segments = parseThinkSegments(text)
 
@@ -148,6 +151,10 @@ function AssistantBubble({
           <span>·</span>
           <span>输出 {usage.output}</span>
           <span>token</span>
+        </div>
+      ) : tokens_used && !streaming ? (
+        <div className="mt-xs text-[11px] text-text-subtle/50">
+          <span>{tokens_used} token</span>
         </div>
       ) : null}
     </div>

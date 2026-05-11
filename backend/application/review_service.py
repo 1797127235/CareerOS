@@ -1,6 +1,5 @@
 """后台记忆审查服务。
 
-从 services/chat_service.py 提取。
 当 Agent 在对话中未主动保存记忆时，后台 fork Agent 审查本轮对话，
 判断是否有值得保存的用户信息。
 """

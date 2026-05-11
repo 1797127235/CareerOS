@@ -21,12 +21,12 @@ def register(agent: Agent[LumenDeps, str]) -> None:
         logger.info("Tool call: get_profile", user_id=ctx.deps.user_id)
 
         if ctx.deps.build_context_cache.strip():
-            return ctx.deps.build_context_cache
+            return _strip_context_tags(ctx.deps.build_context_cache)
 
         memory_instance = get_memory()
         context = await memory_instance.build_context(ctx.deps.user_id)
         if context.strip():
-            return context
+            return _strip_context_tags(context)
         return "用户画像为空，请先上传简历或手动填写画像。"
 
     @agent.tool
@@ -117,3 +117,11 @@ def register(agent: Agent[LumenDeps, str]) -> None:
             ctx.deps.build_context_cache = ""  # 写入后使缓存失效
             return f"画像已更新：{', '.join(validated.model_dump(exclude_none=True).keys())}"
         return "画像内容没有变化，跳过更新。"
+
+
+def _strip_context_tags(text: str) -> str:
+    """去除 <memory-context> 包裹标签，避免向 LLM 暴露隔离机制。"""
+    import re
+
+    text = re.sub(r"^<memory-context>\n\[System note:[^\]]*\]\n", "", text)
+    return text.removesuffix("\n</memory-context>")

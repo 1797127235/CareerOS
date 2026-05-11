@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # pyright: ignore[reportMissingImports]
 
 from backend.agent.deps import LumenDeps
-from backend.api.chat.session import save_pydantic_history
+from backend.application.chat_session import save_pydantic_history
 from backend.domain.models import AgentTrace, Message
 from backend.logging_config import get_logger
 
@@ -25,17 +25,23 @@ async def persist_turn(
     deps: LumenDeps,
 ) -> bool:
     """持久化一轮对话：保存 AI 回复、更新消息计数、保存历史、持久化 Trace、触发记忆投影/审查"""
+    # 写入 token 用量（PydanticAI 在 agent_run_result 事件中已捕获）
+    tokens_used: int | None = None
+    if state.usage_data:
+        tokens_used = (state.usage_data.get("input") or 0) + (state.usage_data.get("output") or 0)
+
     db.add(
         Message(
             conversation_id=conv.conversation_id,
             role="assistant",
             content=state.full_content,
             intent="consultation",
+            tokens_used=tokens_used,
         )
     )
     conv.message_count = (conv.message_count or 0) + 1
     conv.last_message_at = datetime.now(UTC)
-    save_pydantic_history(conv, state.new_msgs)
+    save_pydantic_history(conv, state.new_msgs, summary=conv.summary)
 
     try:
         await db.commit()
@@ -65,7 +71,7 @@ async def persist_turn(
             logger.warning("记忆投影失败", error=str(e))
 
     if not state.cancelled and not deps.pending_event_ids:
-        from backend.api.routers.review import background_memory_review
+        from backend.application.review_service import background_memory_review
 
         task = asyncio.create_task(
             background_memory_review(

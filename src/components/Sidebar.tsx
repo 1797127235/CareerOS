@@ -128,7 +128,12 @@ export default function Sidebar() {
                   <div className="truncate text-sm text-text group-hover:text-ink transition-colors">
                     {item.title || '未命名'}
                   </div>
-                  <div className="text-xs text-text-subtle">{formatTime(item.last_message_at)}</div>
+                  <div className="text-xs text-text-subtle">
+                    {formatTime(item.last_message_at)}
+                    {item.total_tokens > 0 && (
+                      <span className="ml-xs text-text-subtle/60">· {item.total_tokens} token</span>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={(e) => void handleDelete(item.conversation_id, e)}

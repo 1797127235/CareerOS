@@ -2,21 +2,15 @@
 从 services/chat_service.py 提取。当 conv 消息数达到阈值时，
 将窗口外的旧消息压缩为摘要并写入 Conversation.summary。
 """
-
 from __future__ import annotations
-
 import asyncio
 from typing import Any, cast
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from backend.domain.models import Conversation, Message
 from backend.logging_config import get_logger
-
 logger = get_logger(__name__)
-
-_SUMMARY_WINDOW = 20
+_SUMMARY_WINDOW = 10
 _MAX_SUMMARY_LOCKS = 128
 _MAX_MSG_CHARS = 200
 
@@ -28,7 +22,6 @@ _SUMMARIZE_PROMPT = (
 )
 
 _summary_locks: dict[str, asyncio.Lock] = {}
-
 
 def _prune_summary_locks() -> None:
     """清理已释放的摘要锁。"""
@@ -115,6 +108,17 @@ async def _summarize_and_persist(db: AsyncSession, conv: Conversation) -> None:
             logger.warning("摘要生成失败，保留旧摘要", conversation_id=conv.conversation_id)
 
 
+def _should_summarize(message_count: int) -> bool:
+    """分级触发策略：第 10 条首次触发，之后每 10 条触发一次。
+
+    早期（≤30）快速积累摘要避免冷启动丢失上下文，
+    后期稳定间隔降低开销。
+    """
+    if message_count < _SUMMARY_WINDOW:
+        return False
+    return message_count % _SUMMARY_WINDOW == 0
+
+
 async def summarize_background(conversation_id: str) -> None:
     """后台摘要任务：自开 session，内部重判触发条件防并发重复触发。"""
     from backend.db import get_async_session_maker
@@ -123,7 +127,7 @@ async def summarize_background(conversation_id: str) -> None:
         async with get_async_session_maker()() as db:
             try:
                 conv = await db.get(Conversation, conversation_id)
-                if conv is None or conv.message_count < 30 or conv.message_count % 10 != 0:
+                if conv is None or not _should_summarize(conv.message_count):
                     return
                 await _summarize_and_persist(db, conv)
             except Exception:

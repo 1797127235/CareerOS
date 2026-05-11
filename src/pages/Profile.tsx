@@ -12,6 +12,9 @@ import {
   type ProfileUpdatePayload,
   type AboutYouResponse,
 } from '../lib/api'
+import { Card } from '../components/Card'
+import { EditButton, SaveButton } from '../components/ProfileActions'
+import { EmptyState } from '../components/EmptyState'
 
 // ═══════════════════════════════════════════
 //  类型与常量
@@ -110,73 +113,6 @@ function getProfileField(profile: Record<string, unknown>, key: string): string 
 
 function _categoryIcon(category: string): string {
   return PATTERN_ICONS[category] || PATTERN_ICONS.default
-}
-
-// ═══════════════════════════════════════════
-//  子组件：卡片外壳
-// ═══════════════════════════════════════════
-
-function Card({
-  title,
-  icon,
-  children,
-  action,
-  className = '',
-}: {
-  title: string
-  icon?: string
-  children: React.ReactNode
-  action?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div className={`border border-border-soft rounded-xl bg-surface overflow-hidden ${className}`}>
-      <div className="flex items-center justify-between px-md py-sm border-b border-border-soft">
-        <div className="flex items-center gap-xs">
-          {icon && <span className="text-lg">{icon}</span>}
-          <h2 className="text-base font-medium text-text">{title}</h2>
-        </div>
-        {action}
-      </div>
-      <div className="p-md">{children}</div>
-    </div>
-  )
-}
-
-function EditButton({ onClick, editing }: { onClick: () => void; editing?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      className="text-xs text-ink hover:text-ink-deep transition-colors px-sm py-1 rounded-md hover:bg-ink/10"
-    >
-      {editing ? '取消' : '编辑'}
-    </button>
-  )
-}
-
-function SaveButton({ onClick, loading }: { onClick: () => void; loading?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={loading}
-      className="text-xs bg-ink text-bg px-sm py-1 rounded-md hover:bg-ink-deep disabled:opacity-50 transition-colors"
-    >
-      {loading ? '保存中…' : '保存'}
-    </button>
-  )
-}
-
-// ═══════════════════════════════════════════
-//  子组件：空状态
-// ═══════════════════════════════════════════
-
-function EmptyState({ message, hint }: { message: string; hint?: string }) {
-  return (
-    <div className="text-center py-xl">
-      <p className="text-text-muted text-sm">{message}</p>
-      {hint && <p className="text-text-subtle text-xs mt-xs">{hint}</p>}
-    </div>
-  )
 }
 
 // ═══════════════════════════════════════════

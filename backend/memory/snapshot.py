@@ -55,7 +55,16 @@ def invalidate_cache(user_id: str) -> None:
 
 
 def get_recent_event_ids(user_id: str) -> set[str]:
-    """保持向后兼容 — L2 去重现在基于对话 ID 而非事件 ID。"""
+    """已废弃 — 请使用 get_context_conv_ids。
+
+    L2 去重现在基于对话 ID 而非事件 ID。
+    """
+    import warnings
+    warnings.warn(
+        "get_recent_event_ids is deprecated, use get_context_conv_ids instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return get_context_conv_ids(user_id)
 
 

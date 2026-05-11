@@ -8,13 +8,13 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from backend.application.memory_service import (
+from backend.application.profile_service import (
     get_profile_structured as _get_profile_structured,
 )
-from backend.application.memory_service import (
+from backend.application.profile_service import (
     update_profile_structured as _update_profile_structured,
 )
-from backend.application.memory_service import (
+from backend.application.resume_service import (
     upload_resume as _upload_resume,
 )
 from backend.logging_config import get_logger
@@ -152,17 +152,6 @@ async def search_memories(
     except Exception as exc:
         logger.error("Memory search failed: %s", exc)
         return []
-
-
-@router.post("/compensate")
-async def compensate_cognee(user_id: str = Query("demo_user")) -> dict:
-    _validate_user_id(user_id)
-    try:
-        fixed = await _get_memory().compensate_cognee(user_id)
-        return {"user_id": user_id, "compensated": fixed}
-    except Exception as exc:
-        logger.error("Cognee compensate failed: %s", exc)
-        raise HTTPException(status_code=500, detail="补偿失败")
 
 
 @router.delete("/{event_id}")

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
-
 from backend.agent.deps import LumenDeps
 from backend.config import get_settings
 from backend.domain.models import Conversation
@@ -70,7 +68,7 @@ def create_agent() -> Agent[LumenDeps, str]:
     """
     from pydantic_ai import Agent, RunContext
 
-    from backend.agent.pydantic_tools import register_tools
+    from backend.agent.tools import register_all_tools
 
     model = _create_model()
 
@@ -101,34 +99,33 @@ def create_agent() -> Agent[LumenDeps, str]:
     )
 
     # 注册工具
-    register_tools(agent)
+    register_all_tools(agent)
 
     # 动态系统提示词：记忆上下文 + 对话历史（放在 system prompt 中而非用户消息）
     # 语义上正确：上下文是系统级背景信息，模型能区分「指令+背景」和「用户请求」
     @agent.system_prompt
     async def dynamic_prompt(ctx: RunContext[LumenDeps]) -> str:
-        db = ctx.deps.db
-        parts = []
-
-        # ── 结构化画像 + 语义召回 ──
-        memory_instance = get_memory()
-        context = await memory_instance.build_context(ctx.deps.user_id, user_input=ctx.deps.current_user_input)
-        if context.strip():
-            ctx.deps.build_context_cache = context
-            parts.append(context)
-
-        # ── 对话摘要 ──
+        # ── 对话摘要（传入 build_context 统一包裹）──
+        conversation_summary: str | None = None
         try:
-            conv = await db.get(Conversation, ctx.deps.conversation_id)
+            conv = await ctx.deps.db.get(Conversation, ctx.deps.conversation_id)
             if conv and conv.summary:
-                parts.append(f"【对话摘要】\n{conv.summary}")
+                conversation_summary = conv.summary
         except Exception:
             pass
 
-        if not parts:
-            return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 memory_save 或 update_profile 保存。"
+        # ── 结构化画像 + 语义召回 + 对话摘要 ──
+        memory_instance = get_memory()
+        context = await memory_instance.build_context(
+            ctx.deps.user_id,
+            user_input=ctx.deps.current_user_input,
+            conversation_summary=conversation_summary,
+        )
+        if context.strip():
+            ctx.deps.build_context_cache = context
+            return context
 
-        return "\n\n".join(parts)
+        return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 memory_save 或 update_profile 保存。"
 
     return agent
 

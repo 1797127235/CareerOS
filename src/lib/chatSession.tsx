@@ -23,6 +23,7 @@ export type ChatMessage = {
   content: string
   usage?: { input: number; output: number }
   traces?: TraceEntry[]
+  tokens_used?: number
 }
 
 type ChatSessionValue = {
@@ -173,7 +174,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     setError(null)
     try {
       const items = await getConversation(id)
-      setMessages(items.filter(i => i.role === 'user' || i.role === 'assistant').map(i => ({ id: genId(), role: i.role as 'user' | 'assistant', content: i.content ?? '' })))
+      setMessages(items.filter(i => i.role === 'user' || i.role === 'assistant').map(i => ({ id: genId(), role: i.role as 'user' | 'assistant', content: i.content ?? '', tokens_used: i.tokens_used ?? undefined })))
       setConversationId(id)
     } catch (e) {
       setError((e as Error).message || '加载会话失败')
