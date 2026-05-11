@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, FunctionToolset, RunContext
 
 from backend.agent.deps import LumenDeps
 from backend.agent.pydantic_agent import _create_model
-from backend.agent.tools.registry import get_registry
 from backend.config import get_settings
 from backend.db import get_async_session_maker
 from backend.domain.models import UploadedFile
@@ -35,6 +34,69 @@ def _smart_truncate(text: str, max_chars: int = 5000) -> str:
 _EXTRACT_PROMPT = "阅读以下用户上传的文件内容，提取对用户画像有价值的信息。\n\n" "【文件：{filename}】\n{text}"
 
 
+# 提取 Agent 专用的工具集（只包含 memory_save 和 update_profile）
+_extract_toolset = FunctionToolset(
+    instructions="提取文档中的用户画像信息，使用 update_profile 更新基本信息，memory_save 保存技能/经历。",
+    timeout=10,
+)
+
+
+@_extract_toolset.tool
+async def memory_save(
+    ctx: RunContext[LumenDeps],
+    entity_type: str,
+    section: str,
+    content: str,
+) -> str:
+    """保存记忆。主动调用！"""
+    from backend.agent.tools.executor import ToolExecutor
+    from backend.agent.tools.internal.memory_save import MemorySaveTool
+    return await ToolExecutor().execute(
+        MemorySaveTool(), ctx, entity_type=entity_type, section=section, content=content
+    )
+
+
+@_extract_toolset.tool
+async def update_profile(
+    ctx: RunContext[LumenDeps],
+    school_name: str | None = None,
+    major: str | None = None,
+    grade: str | None = None,
+    graduation_year: str | None = None,
+    school_level: str | None = None,
+    target_direction: str | None = None,
+    target_company_level: str | None = None,
+    city: str | None = None,
+    gpa: str | None = None,
+    ranking: str | None = None,
+    awards: list[str] | None = None,
+    bio: str | None = None,
+    english_level: str | None = None,
+    expected_salary: str | None = None,
+) -> str:
+    """更新用户画像。只传有值的字段。"""
+    from backend.agent.tools.executor import ToolExecutor
+    from backend.agent.tools.internal.profile import UpdateProfileTool
+    return await ToolExecutor().execute(
+        UpdateProfileTool(),
+        ctx,
+        school_name=school_name,
+        major=major,
+        grade=grade,
+        graduation_year=graduation_year,
+        school_level=school_level,
+        target_direction=target_direction,
+        target_company_level=target_company_level,
+        city=city,
+        gpa=gpa,
+        ranking=ranking,
+        awards=awards,
+        bio=bio,
+        english_level=english_level,
+        expected_salary=expected_salary,
+    )
+
+
 def _get_extract_agent() -> Agent[LumenDeps, str]:
     """创建轻量提取 Agent（不缓存，避免配置漂移）。"""
     agent = Agent(
@@ -55,11 +117,8 @@ def _get_extract_agent() -> Agent[LumenDeps, str]:
             "5. 调用工具后不需要生成额外文字，直接结束"
         ),
         retries=2,
+        toolsets=[_extract_toolset],
     )
-
-    # 注册提取 Agent 需要的工具（只注册 memory_save 和 update_profile）
-    registry = get_registry()
-    registry.register_selective(agent, ["memory_save", "update_profile"])
     return agent
 
 

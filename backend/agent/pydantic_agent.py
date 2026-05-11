@@ -70,9 +70,10 @@ def create_agent() -> Agent[LumenDeps, str]:
     """
     from pydantic_ai import Agent, RunContext
 
-    from backend.agent.tools import register_all_tools
+    from backend.agent.tools.registry import discover_toolsets
 
     model = _create_model()
+    toolsets = discover_toolsets()
 
     agent = Agent(
         model=model,
@@ -98,10 +99,8 @@ def create_agent() -> Agent[LumenDeps, str]:
         ),
         retries=2,
         end_strategy="graceful",  # 流式 output_type=str：同时返回文本+工具调用时仍需执行工具
+        toolsets=toolsets,
     )
-
-    # 注册工具
-    register_all_tools(agent)
 
     # 动态系统提示词：记忆上下文 + 对话历史（放在 system prompt 中而非用户消息）
     # 语义上正确：上下文是系统级背景信息，模型能区分「指令+背景」和「用户请求」
