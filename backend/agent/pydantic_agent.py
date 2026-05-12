@@ -21,6 +21,22 @@ _cached_agent: Agent[LumenDeps, str] | None = None
 _cached_config_hash: str = ""
 _cached_agent_generation: int = 0
 
+# 新工具运行时（全局单例，懒加载）
+_tool_runtime: tuple | None = None
+
+
+def _get_tool_runtime():
+    """获取或创建新工具运行时（registry + dispatcher + resolver）。"""
+    global _tool_runtime
+    if _tool_runtime is None:
+        from backend.agent.tools.adapters import PydanticAIToolAdapter
+        from backend.agent.tools.core.factory import create_tool_runtime
+
+        registry, dispatcher, resolver = create_tool_runtime()
+        adapter = PydanticAIToolAdapter(registry, dispatcher, resolver)
+        _tool_runtime = (registry, dispatcher, resolver, adapter)
+    return _tool_runtime
+
 
 def _create_model() -> OpenAIChatModel:
     """创建 LiteLLM 兼容的 OpenAI 模型实例
@@ -70,10 +86,13 @@ def create_agent() -> Agent[LumenDeps, str]:
     """
     from pydantic_ai import Agent, RunContext
 
-    from backend.agent.tools.registry import discover_toolsets
+    # 旧系统已迁移完毕，discover_toolsets 不再使用
 
     model = _create_model()
-    toolsets = discover_toolsets()
+
+    # 新工具运行时（Registry + Dispatcher + Adapter）
+    _, _, _, adapter = _get_tool_runtime()
+    all_toolsets = [adapter.build_toolset(["default-chat"])]
 
     agent = Agent(
         model=model,
@@ -99,7 +118,7 @@ def create_agent() -> Agent[LumenDeps, str]:
         ),
         retries=2,
         end_strategy="graceful",  # 流式 output_type=str：同时返回文本+工具调用时仍需执行工具
-        toolsets=toolsets,
+        toolsets=all_toolsets,
     )
 
     # 动态系统提示词：记忆上下文 + 对话历史（放在 system prompt 中而非用户消息）

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query  # pyright: ignore[reportMissingImports]
+from fastapi.responses import StreamingResponse  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select  # pyright: ignore[reportMissingImports]
+from sqlalchemy.ext.asyncio import AsyncSession  # pyright: ignore[reportMissingImports]
 
 from backend.application.chat_service import stream_chat
 from backend.db import get_db
@@ -57,13 +58,22 @@ class MessageItem(BaseModel):
 @router.post("")
 async def send_message(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     async def sse_stream():
-        async for event in stream_chat(
-            db=db,
-            user_id=req.user_id,
-            user_input=req.message,
-            conversation_id=req.conversation_id,
-        ):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            async for event in stream_chat(
+                db=db,
+                user_id=req.user_id,
+                user_input=req.message,
+                conversation_id=req.conversation_id,
+            ):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            # 客户端断开连接，静默退出
+            logger.debug("SSE client disconnected", conversation_id=req.conversation_id)
+            return
+        except Exception as exc:
+            # 防止未捕获异常导致500错误
+            logger.warning("SSE stream error", error=str(exc), conversation_id=req.conversation_id)
+            yield f"data: {json.dumps({'type': 'error', 'message': '连接中断'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 

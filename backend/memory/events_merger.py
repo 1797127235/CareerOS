@@ -291,42 +291,7 @@ def _build_experiences_section(experiences: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_documents_section(documents: list[dict]) -> str:
-    """构建已上传文件章节（合并到 memory.md），最多 5 条。"""
-    if not documents:
-        return ""
-    lines = ["## 已上传文件"]
-    for doc in documents[:5]:
-        size_kb = doc["size_bytes"] / 1024
-        lines.append(f"- {doc['filename']}（{doc['file_type']}，{size_kb:.0f}KB）")
-    return "\n".join(lines)
-
-
-def merge_document_events(events: list) -> list[dict]:
-    """合并文件上传事件，返回文档列表（按上传时间倒序，SHA256 去重）。"""
-    docs = []
-    seen_hashes: set[str] = set()
-    for event in reversed(events):
-        payload = load_payload(event)
-        h = payload.get("file_hash", "")
-        if h in seen_hashes:
-            continue
-        seen_hashes.add(h)
-        docs.append(
-            {
-                "filename": payload.get("filename", ""),
-                "file_type": payload.get("file_type", ""),
-                "size_bytes": payload.get("size_bytes", 0),
-                "chunk_count": payload.get("chunk_count", 0),
-                "preview": payload.get("preview", ""),
-                "uploaded_at": str(event.created_at) if hasattr(event, "created_at") else "",
-            }
-        )
-    return list(reversed(docs))
-
-
 __all__ = [
-    "_build_documents_section",
     "_build_experiences_section",
     "_build_skills_section",
     "deep_merge",
@@ -335,7 +300,6 @@ __all__ = [
     "load_payload",
     "merge_decision_events",
     "merge_dict_events",
-    "merge_document_events",
     "merge_experience_events",
     "merge_profile_events",
     "merge_skill_events",

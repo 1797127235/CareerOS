@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import UsageLimits
 
 from backend.agent.deps import LumenDeps
 from backend.agent.event_handlers import EVENT_HANDLERS
@@ -59,12 +60,16 @@ async def stream_chat(
 
             agent = get_agent()
             agent_generation = get_agent_generation()
+            # 绑定工具运行时工作区
+            from backend.utils.path_utils import find_project_root
+
             deps = LumenDeps(
                 user_id=user_id,
                 db=db,
                 conversation_id=conv.conversation_id,
                 current_user_input=user_input,
                 agent_generation=agent_generation,
+                workspace_root=find_project_root(),
             )
 
             history = load_pydantic_history(conv)
@@ -74,6 +79,10 @@ async def stream_chat(
                 message_history=history,
                 deps=deps,
                 model_settings=ModelSettings(max_tokens=4096),
+                usage_limits=UsageLimits(
+                    request_limit=8,  # 最多 8 轮模型请求（含工具调用）
+                    tool_calls_limit=6,  # 最多 6 次成功工具调用
+                ),
             ):
                 if cancel_event.is_set():
                     state.cancelled = True

@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from backend.domain.schemas.knowledge import FilePayload
 from backend.domain.schemas.profile import (
     DecisionPayload,
     ExperiencePayload,
@@ -46,5 +45,4 @@ EVENT_PAYLOAD_MAP: dict[str, type[BaseModel]] = {
     "goal_updated": KeyValuePayload,
     "status_changed": KeyValuePayload,
     "decision_made": DecisionPayload,
-    "document_uploaded": FilePayload,
 }

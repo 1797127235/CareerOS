@@ -197,7 +197,7 @@ async def _get_journey(user_id: str) -> list[dict]:
             select(GrowthEvent)
             .where(
                 GrowthEvent.user_id == user_id,
-                GrowthEvent.event_type.notin_(["profile_updated", "document_uploaded"]),
+                GrowthEvent.event_type.notin_(["profile_updated"]),
             )
             .order_by(GrowthEvent.created_at.desc())
             .limit(50)

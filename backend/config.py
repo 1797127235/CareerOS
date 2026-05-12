@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     # 单实例 / 自托管默认共用一个数据集；多用户同机部署时请为每用户拆分策略另行设计
     cognee_dataset: str = "lumen"
 
+    # ── Agent 工作目录 ──
+    # Agent 文件工具可访问的根目录（用于开发时访问项目文件）
+    # 默认使用用户主目录（最安全），可配置为项目根目录以方便开发
+    # 示例：AGENT_WORKSPACE_DIR=E:\\MyHub\\career-os
+    agent_workspace_dir: str = ""
+
     # ── 应用 ──
     debug: bool = True
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]

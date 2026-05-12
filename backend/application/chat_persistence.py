@@ -60,7 +60,7 @@ async def persist_turn(
             gen_now=_get_agent_generation(),
         )
 
-    await persist_traces(db, conv.conversation_id, user_id, state.trace_records)
+    await persist_traces(db, conv.conversation_id, user_id, state.trace_records, deps.trace_sink)
 
     if deps.pending_event_ids:
         try:
@@ -86,12 +86,45 @@ async def persist_turn(
     return True
 
 
-async def persist_traces(db: AsyncSession, conversation_id: str, user_id: str, trace_records: list[dict]) -> None:
-    """持久化 Agent Trace 记录"""
-    if not trace_records:
+async def persist_traces(
+    db: AsyncSession,
+    conversation_id: str,
+    user_id: str,
+    trace_records: list[dict],
+    runtime_traces: list[dict] | None = None,
+) -> None:
+    """持久化 Agent Trace 记录。
+
+    Args:
+        trace_records: PydanticAI 事件流产生的 trace（tool_call / tool_result）
+        runtime_traces: 新 runtime Dispatcher 产生的内部 trace（预算拒绝、路径错误等）
+    """
+    all_records: list[dict] = list(trace_records)
+
+    # 将 runtime trace 转换为 AgentTrace 兼容格式
+    if runtime_traces:
+        import json
+
+        for tr in runtime_traces:
+            all_records.append(
+                {
+                    "step_number": len(all_records) + 1,
+                    "step_type": "tool_dispatch",
+                    "tool_name": tr.get("tool"),
+                    "tool_args": tr.get("args"),
+                    "tool_result": tr.get("result") if tr.get("ok") else tr.get("error"),
+                    "content": json.dumps(tr, ensure_ascii=False, default=str)[:5000],
+                    "duration_ms": tr.get("duration_ms", 0),
+                    "success": tr.get("ok", True),
+                    "error_message": tr.get("error", ""),
+                }
+            )
+
+    if not all_records:
         return
+
     try:
-        for tr in trace_records:
+        for tr in all_records:
             db.add(
                 AgentTrace(
                     conversation_id=conversation_id,
@@ -102,6 +135,9 @@ async def persist_traces(db: AsyncSession, conversation_id: str, user_id: str, t
                     tool_args=tr.get("tool_args"),
                     tool_result=tr.get("tool_result"),
                     content=tr["content"][:5000],
+                    duration_ms=tr.get("duration_ms", 0),
+                    success=tr.get("success", True),
+                    error_message=tr.get("error_message", ""),
                 )
             )
         await db.commit()

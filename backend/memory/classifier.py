@@ -28,7 +28,6 @@ NARRATIVE_EVENT_TYPES: frozenset[str] = frozenset(
     {
         "experience_added",
         "decision_made",
-        "document_uploaded",
     }
 )
 

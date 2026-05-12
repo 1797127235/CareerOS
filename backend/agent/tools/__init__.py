@@ -1,22 +1,26 @@
-"""Agent 工具模块 — 统一工具系统入口。
+"""Agent 工具模块 — 统一工具系统入口（新架构）。
 
 使用方式：
-  from backend.agent.tools import discover_toolsets
-  toolsets = discover_toolsets()
-  agent = Agent(..., toolsets=toolsets)
+  from backend.agent.tools.core.factory import create_tool_runtime
+  registry, dispatcher, resolver = create_tool_runtime()
 
-内部通过 AST 扫描发现 toolsets/*.py 中的 FunctionToolset（零副作用）。
+内部通过 Registry + Dispatcher 管理工具，不再依赖 AST 扫描。
 """
 
-from backend.agent.tools.internal.memory_save import MemorySaveTool
-from backend.agent.tools.internal.memory_search import MemorySearchTool
-from backend.agent.tools.internal.profile import GetProfileTool, UpdateProfileTool
-from backend.agent.tools.registry import discover_toolsets
+from backend.agent.tools.core import (
+    ToolDefinition,
+    ToolDispatcher,
+    ToolRegistry,
+    ToolRuntimeContext,
+    ToolsetResolver,
+)
+from backend.agent.tools.core.factory import create_tool_runtime
 
 __all__ = [
-    "discover_toolsets",
-    "MemorySearchTool",
-    "MemorySaveTool",
-    "GetProfileTool",
-    "UpdateProfileTool",
+    "create_tool_runtime",
+    "ToolDefinition",
+    "ToolRuntimeContext",
+    "ToolRegistry",
+    "ToolDispatcher",
+    "ToolsetResolver",
 ]

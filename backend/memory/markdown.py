@@ -16,13 +16,11 @@ from backend.domain.models import GrowthEvent
 from backend.logging_config import get_logger
 from backend.memory.constants import MD_CHAR_LIMITS
 from backend.memory.events_merger import (
-    _build_documents_section,
     _build_experiences_section,
     _build_skills_section,
     generate_memory_md,
     merge_decision_events,
     merge_dict_events,
-    merge_document_events,
     merge_experience_events,
     merge_profile_events,
     merge_skill_events,
@@ -156,15 +154,9 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
         skills_section = _build_skills_section(skills)
         exp_section = _build_experiences_section(experiences)
 
-        doc_events = [e for e in events if e.event_type == "document_uploaded"]
-        docs_section = ""
-        if doc_events:
-            documents = merge_document_events(doc_events)
-            docs_section = _build_documents_section(documents)
-
         # 拼接为一个 memory.md
         combined = core
-        for section in [skills_section, exp_section, docs_section]:
+        for section in [skills_section, exp_section]:
             if section:
                 combined += "\n\n" + section
 

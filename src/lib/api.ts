@@ -43,12 +43,3 @@ export type {
   ResumeUploadResult,
   StructuredProfile,
 } from "./api/memory";
-
-// ── Knowledge ──
-export {
-  deleteKnowledgeFile,
-  getKnowledgeFileStatus,
-  getKnowledgeFiles,
-  uploadKnowledgeFile,
-} from "./api/knowledge";
-export type { KnowledgeFile, KnowledgeFileStatus } from "./api/knowledge";
