@@ -3,6 +3,7 @@
 按实体拆分到独立模块，通过此文件统一导出。
 """
 
+from backend.data_sources.models import DataSource
 from backend.domain.models.agent_trace import AgentTrace
 from backend.domain.models.conversation import Conversation
 from backend.domain.models.growth_event import GrowthEvent
@@ -12,6 +13,7 @@ from backend.domain.models.user import User, UserProfile
 __all__ = [
     "AgentTrace",
     "Conversation",
+    "DataSource",
     "GrowthEvent",
     "Message",
     "User",

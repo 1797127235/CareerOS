@@ -21,10 +21,18 @@ MAX_CONTENT_CHARS = 50000
 class FilesystemConnector(DataSourceConnector):
     """扫描本地目录中的 Markdown / 文本文件。"""
 
-    _source_id = "filesystem"
+    _source_id = "local_folder"
 
-    def __init__(self, directories: list[str]) -> None:
+    def __init__(
+        self,
+        directories: list[str],
+        *,
+        user_id: str = "demo_user",
+        data_source_id: str = "",
+    ) -> None:
         self._dirs = [Path(d) for d in directories]
+        self._user_id = user_id
+        self._data_source_id = data_source_id or self._source_id
         self._observer = None  # watchdog Observer，延迟初始化
 
     @property
@@ -68,12 +76,16 @@ class FilesystemConnector(DataSourceConnector):
                 logger.debug("ingestion.filesystem.file_truncated", path=str(path), original_len=len(content))
                 content = content[:MAX_CONTENT_CHARS]
             mtime = stat.st_mtime if stat else path.stat().st_mtime
+            resolved = path.resolve()
             return RawDocument(
-                source_id=self.source_id,
-                doc_id=str(path.resolve()),
+                user_id=self._user_id,
+                data_source_id=self._data_source_id,
+                connector_type=self.source_id,
+                external_id=str(resolved),
+                uri=resolved.as_uri(),
+                title=path.stem,
                 content=content,
                 metadata={
-                    "title": path.stem,
                     "extension": path.suffix,
                     "last_modified": mtime,
                 },

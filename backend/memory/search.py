@@ -189,10 +189,15 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str]) -> list[
             rows = (
                 await db.execute(
                     text(f"""
-                        SELECT ei.id, ei.content, ei.source_id, ei.doc_id, ei.indexed_at
+                        SELECT
+                            ei.id, ei.content, ei.connector_type, ei.external_id,
+                            ei.uri, ei.title, ei.indexed_at, ei.updated_at,
+                            ds.name as source_name
                         FROM external_items ei
+                        LEFT JOIN data_sources ds ON ds.id = ei.data_source_id
                         JOIN {fts_table} fts ON fts.rowid = ei.rowid
                         WHERE {fts_table} MATCH :q
+                          AND ei.deleted_at IS NULL
                         ORDER BY ei.indexed_at DESC
                         LIMIT :lim
                     """),
@@ -205,13 +210,30 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str]) -> list[
                 if eid in seen:
                     continue
                 seen.add(eid)
-                created_at = row[4]
+                indexed_at = row[6]
+                updated_at = row[7]
+                source_name = row[8] or row[2] or "未知来源"
+                title = row[5] or "未命名文档"
+                uri = row[4] or ""
+                snippet = row[1][:300] if row[1] else ""
+                # 格式化返回内容，包含引用信息
+                content = (
+                    f"标题: {title}\n"
+                    f"来源: {source_name}\n"
+                    f"路径: {uri}\n"
+                    f"片段: {snippet}\n"
+                    f"item_id: {row[0]}"
+                )
                 results.append(
                     MemoryItem(
                         id=eid,
-                        content=row[1][:500] if row[1] else "",
-                        created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
-                        categories=[f"external:{row[2]}"],
+                        content=content,
+                        created_at=(
+                            updated_at.isoformat()
+                            if updated_at and hasattr(updated_at, "isoformat")
+                            else (indexed_at.isoformat() if indexed_at and hasattr(indexed_at, "isoformat") else None)
+                        ),
+                        categories=[f"external:{source_name}"],
                     )
                 )
     except Exception as exc:
@@ -235,9 +257,14 @@ async def _search_external_like(query: str, limit: int, seen: set[str]) -> list[
             rows = (
                 await db.execute(
                     text("""
-                        SELECT ei.id, ei.content, ei.source_id, ei.doc_id, ei.indexed_at
+                        SELECT
+                            ei.id, ei.content, ei.connector_type, ei.external_id,
+                            ei.uri, ei.title, ei.indexed_at, ei.updated_at,
+                            ds.name as source_name
                         FROM external_items ei
+                        LEFT JOIN data_sources ds ON ds.id = ei.data_source_id
                         WHERE ei.content LIKE :q ESCAPE '!'
+                          AND ei.deleted_at IS NULL
                         ORDER BY ei.indexed_at DESC
                         LIMIT :lim
                     """),
@@ -250,13 +277,29 @@ async def _search_external_like(query: str, limit: int, seen: set[str]) -> list[
                 if eid in seen:
                     continue
                 seen.add(eid)
-                created_at = row[4]
+                indexed_at = row[6]
+                updated_at = row[7]
+                source_name = row[8] or row[2] or "未知来源"
+                title = row[5] or "未命名文档"
+                uri = row[4] or ""
+                snippet = row[1][:300] if row[1] else ""
+                content = (
+                    f"标题: {title}\n"
+                    f"来源: {source_name}\n"
+                    f"路径: {uri}\n"
+                    f"片段: {snippet}\n"
+                    f"item_id: {row[0]}"
+                )
                 results.append(
                     MemoryItem(
                         id=eid,
-                        content=row[1][:500] if row[1] else "",
-                        created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
-                        categories=[f"external:{row[2]}"],
+                        content=content,
+                        created_at=(
+                            updated_at.isoformat()
+                            if updated_at and hasattr(updated_at, "isoformat")
+                            else (indexed_at.isoformat() if indexed_at and hasattr(indexed_at, "isoformat") else None)
+                        ),
+                        categories=[f"external:{source_name}"],
                     )
                 )
     except Exception as exc:

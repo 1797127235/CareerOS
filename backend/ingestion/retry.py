@@ -13,7 +13,6 @@ async def jittered_sleep(
     jitter: float = 0.5,
 ) -> None:
     """在重试前等待带抖动的退避时间。
-
     公式：min(base * 2^(attempt-1), max_delay) + random(0, jitter_ratio * delay)
     """
     delay = min(base * (2 ** (attempt - 1)), max_delay)

@@ -74,18 +74,58 @@ async def migrate_sqlite(conn) -> None:
         """INSERT INTO growth_events_fts_trigram(rowid, event_type, entity_type, entity_id, payload_json)
             SELECT rowid, event_type, entity_type, entity_id, payload_json FROM growth_events
             WHERE rowid NOT IN (SELECT rowid FROM growth_events_fts_trigram)""",
-        # ── external_items: 外部数据文档索引（Phase 2a）──
+        # ── data_sources: 用户数据源连接（Phase 2b）──
+        """CREATE TABLE IF NOT EXISTS data_sources (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT 'demo_user',
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            config_json TEXT NOT NULL DEFAULT '{}',
+            credential_ref TEXT,
+            capabilities_json TEXT NOT NULL DEFAULT '[]',
+            last_sync_at TIMESTAMP,
+            last_error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_data_sources_user ON data_sources (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_data_sources_user_status ON data_sources (user_id, status)",
+        # ── external_items: 外部数据文档索引（Phase 2a/2b）──
         """CREATE TABLE IF NOT EXISTS external_items (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT 'demo_user',
+            data_source_id TEXT,
+            connector_type TEXT,
             source_id TEXT NOT NULL,
             doc_id TEXT NOT NULL,
+            external_id TEXT,
+            uri TEXT,
+            title TEXT,
             content TEXT,
             content_hash TEXT,
             metadata_json TEXT,
             indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP,
+            deleted_at TIMESTAMP,
             UNIQUE(source_id, doc_id)
         )""",
         "CREATE INDEX IF NOT EXISTS ix_external_items_source_doc ON external_items (source_id, doc_id)",
+        "CREATE INDEX IF NOT EXISTS ix_external_items_data_source ON external_items (data_source_id)",
+        "CREATE INDEX IF NOT EXISTS ix_external_items_user ON external_items (user_id)",
+        # 幂等加列（SQLite ALTER TABLE ADD COLUMN）
+        "ALTER TABLE external_items ADD COLUMN user_id TEXT NOT NULL DEFAULT 'demo_user'",
+        "ALTER TABLE external_items ADD COLUMN data_source_id TEXT",
+        "ALTER TABLE external_items ADD COLUMN connector_type TEXT",
+        "ALTER TABLE external_items ADD COLUMN external_id TEXT",
+        "ALTER TABLE external_items ADD COLUMN uri TEXT",
+        "ALTER TABLE external_items ADD COLUMN title TEXT",
+        "ALTER TABLE external_items ADD COLUMN updated_at TIMESTAMP",
+        "ALTER TABLE external_items ADD COLUMN deleted_at TIMESTAMP",
+        # 回填已有数据
+        "UPDATE external_items SET data_source_id = source_id, connector_type = source_id, external_id = doc_id WHERE data_source_id IS NULL",
+        # 新增唯一约束索引（data_source_id + external_id）
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_external_items_ds_ext ON external_items (data_source_id, external_id)",
         """CREATE VIRTUAL TABLE IF NOT EXISTS external_items_fts USING fts5(
             content
         )""",

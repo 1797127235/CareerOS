@@ -103,7 +103,7 @@ async def test_filesystem_connector_scan(sample_vault: Path) -> None:
     async for doc in conn.scan():
         docs.append(doc)
 
-    doc_ids = {d.doc_id for d in docs}
+    doc_ids = {d.external_id for d in docs}
     assert any("hello.md" in d for d in doc_ids)
     assert any("笔记.md" in d for d in doc_ids)
     assert any("proj.md" in d for d in doc_ids)
@@ -115,7 +115,7 @@ async def test_filesystem_connector_truncation(sample_vault: Path) -> None:
     """超大文件应被截断。"""
     conn = FilesystemConnector([str(sample_vault)])
     async for doc in conn.scan():
-        if "big.txt" in doc.doc_id:
+        if "big.txt" in doc.external_id:
             assert len(doc.content) <= 50_000
             break
     else:

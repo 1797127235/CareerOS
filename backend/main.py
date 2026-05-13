@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.api import chat
 from backend.api.routers import config, health, memory
 from backend.config import apply_user_config, get_settings
+from backend.data_sources.routes import router as data_sources_router
 from backend.db import Base, get_engine, init_db
 from backend.db_migrations import migrate_sqlite
 from backend.domain.models import *  # noqa — 确保所有模型注册到 Base
@@ -125,6 +126,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
+app.include_router(data_sources_router, prefix="/api")
 
 # ── 静态文件托管：dist/ 存在时始终挂载（开发/桌面/生产都可用） ──
 if True:  # 始终启用（桌面/生产模式依赖此挂载）

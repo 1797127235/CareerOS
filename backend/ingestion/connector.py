@@ -14,8 +14,12 @@ from typing import Any
 class RawDocument:
     """从外部数据源读取的原始文档。"""
 
-    source_id: str  # "filesystem" / "github"
-    doc_id: str  # 文档唯一标识（文件绝对路径 或 "owner/repo/path"）
+    user_id: str  # 当前用户（如 "demo_user"）
+    data_source_id: str  # 用户建立的连接 ID（如 "ds_xxx"）
+    connector_type: str  # "local_folder" / "web_url" / "github_repo"
+    external_id: str  # 源系统内唯一 ID（文件绝对路径、URL、GitHub path）
+    uri: str  # 可展示引用地址（file:///...、https://...）
+    title: str  # 文档标题（用于 Agent 和前端展示）
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -53,10 +57,9 @@ class DataSourceConnector(ABC):
         loop: asyncio.AbstractEventLoop,
     ) -> None:
         """启动增量监听。
-
         Args:
             on_change: 文件新增/修改时的回调，参数为 RawDocument。
-            on_delete: 文件删除时的回调，参数为 (source_id, doc_id)。
+            on_delete: 文件删除时的回调，参数为 (connector_type, external_id)。
             loop: 主线程的事件循环，由调用方显式传入。
         """
 

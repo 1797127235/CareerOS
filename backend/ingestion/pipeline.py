@@ -59,47 +59,67 @@ class IngestionPipeline:
 
     async def _ingest_with_retry(self, doc: RawDocument) -> bool:
         """带 jittered 重试的单文档摄入。"""
-        if self._store.is_indexed(doc.doc_id, doc.content_hash):
+        if self._store.is_indexed(doc.external_id, doc.content_hash):
             return False
 
         for attempt in range(1, MAX_RETRY + 1):
             try:
                 await self._write_to_db(doc)
-                self._store.mark_indexed(doc.doc_id, doc.content_hash, doc.source_id)
+                self._store.mark_indexed(doc.external_id, doc.content_hash, doc.connector_type)
                 return True
             except Exception as exc:
                 logger.warning(
                     "ingestion.write_failed",
-                    doc_id=doc.doc_id,
+                    external_id=doc.external_id,
                     attempt=attempt,
                     error=str(exc),
                 )
-                self._store.mark_failed(doc.doc_id, str(exc))
+                self._store.mark_failed(doc.external_id, str(exc))
                 if attempt < MAX_RETRY:
                     await jittered_sleep(attempt)
         return False
 
     async def _write_to_db(self, doc: RawDocument) -> None:
         """UPSERT 文档到 external_items。FTS5 由 SQLite trigger 同步。"""
-        item_id = f"{doc.source_id}:{uuid.uuid5(uuid.NAMESPACE_URL, doc.doc_id)}"
+        item_id = f"{doc.connector_type}:{uuid.uuid5(uuid.NAMESPACE_URL, doc.external_id)}"
         metadata_json = json.dumps(doc.metadata, ensure_ascii=False)
 
         async with get_async_session_maker()() as db:
             # UPSERT（ON CONFLICT 更新内容）
             await db.execute(
                 text("""
-                INSERT INTO external_items (id, source_id, doc_id, content, content_hash, metadata_json)
-                VALUES (:id, :source_id, :doc_id, :content, :hash, :meta)
+                INSERT INTO external_items (
+                    id, user_id, data_source_id, connector_type, source_id, doc_id, external_id,
+                    uri, title, content, content_hash, metadata_json, indexed_at, updated_at
+                )
+                VALUES (
+                    :id, :user_id, :ds_id, :ctype, :source_id, :doc_id, :ext_id,
+                    :uri, :title, :content, :hash, :meta, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
                 ON CONFLICT(source_id, doc_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    data_source_id = excluded.data_source_id,
+                    connector_type = excluded.connector_type,
+                    external_id = excluded.external_id,
+                    uri = excluded.uri,
+                    title = excluded.title,
                     content = excluded.content,
                     content_hash = excluded.content_hash,
                     metadata_json = excluded.metadata_json,
-                    indexed_at = CURRENT_TIMESTAMP
+                    indexed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP,
+                    deleted_at = NULL
             """),
                 {
                     "id": item_id,
-                    "source_id": doc.source_id,
-                    "doc_id": doc.doc_id,
+                    "user_id": doc.user_id,
+                    "ds_id": doc.data_source_id,
+                    "ctype": doc.connector_type,
+                    "source_id": doc.connector_type,
+                    "doc_id": doc.external_id,
+                    "ext_id": doc.external_id,
+                    "uri": doc.uri,
+                    "title": doc.title,
                     "content": doc.content[:50000],
                     "hash": doc.content_hash,
                     "meta": metadata_json,
@@ -109,22 +129,22 @@ class IngestionPipeline:
 
     async def handle_change(self, doc: RawDocument) -> None:
         """文件监听回调：单个文件变更时调用。"""
-        logger.info("ingestion.file_changed", doc_id=doc.doc_id)
+        logger.info("ingestion.file_changed", external_id=doc.external_id)
         await self._ingest_with_retry(doc)
 
-    async def handle_delete(self, source_id: str, doc_id: str) -> None:
+    async def handle_delete(self, connector_type: str, external_id: str) -> None:
         """文件删除回调：从 external_items 移除并清理 store。"""
         async with get_async_session_maker()() as db:
             await db.execute(
                 text("DELETE FROM external_items WHERE source_id=:sid AND doc_id=:did"),
-                {"sid": source_id, "did": doc_id},
+                {"sid": connector_type, "did": external_id},
             )
             await db.commit()
         with self._store._lock:
-            self._store._state["indexed"].pop(doc_id, None)
-            self._store._state["failed"].pop(doc_id, None)
+            self._store._state["indexed"].pop(external_id, None)
+            self._store._state["failed"].pop(external_id, None)
             self._store._save()
-        logger.info("ingestion.deleted", source_id=source_id, doc_id=doc_id)
+        logger.info("ingestion.deleted", connector_type=connector_type, external_id=external_id)
 
     def start_watching_all(self) -> None:
         """启动所有连接器的增量监听。loop 在主线程获取，显式传入 watchdog 线程。"""

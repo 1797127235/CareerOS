@@ -20,10 +20,12 @@ async def setup_db():
     """测试会话开始时建表，结束时清理"""
     init_db(TEST_DATABASE_URL)
     from backend.db import get_engine
+    from backend.db_migrations import migrate_sqlite
 
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_sqlite(conn)
     yield
     await engine.dispose()
 
