@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from backend.agent.tools.builtin import (
+    handle_data_source_get_item,
+    handle_data_source_list,
+    handle_data_source_search,
+    handle_data_source_status,
     handle_file_list,
     handle_file_read,
     handle_file_search,
@@ -10,7 +14,6 @@ from backend.agent.tools.builtin import (
     handle_get_profile,
     handle_memory_save,
     handle_memory_search,
-    handle_search_external_docs,
     handle_update_profile,
 )
 from backend.agent.tools.core import (
@@ -210,12 +213,12 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
         )
     )
 
-    # ── 注册外部文档工具 ──
+    # ── 注册数据源读取工具 ──
     registry.register(
         ToolDefinition(
-            name="search_external_docs",
+            name="data_source_search",
             description=(
-                "搜索用户本地文档（Obsidian 笔记、Markdown 文件等）。"
+                "搜索用户已连接的数据源（Obsidian 笔记、Markdown 文件等）。"
                 "当用户提到某个技术、项目或想法，但对话记忆中找不到时，"
                 "可用此工具搜索外部笔记。"
             ),
@@ -229,7 +232,47 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
             },
             category="builtin",
             read_only=True,
-            handler=handle_search_external_docs,
+            handler=handle_data_source_search,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="data_source_list",
+            description="列出当前用户已连接的数据源及其状态。",
+            input_schema={"type": "object", "properties": {}},
+            category="builtin",
+            read_only=True,
+            handler=handle_data_source_list,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="data_source_get_item",
+            description="按 item_id 读取外部文档的完整内容，用于用户追问某一条资料。",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string", "description": "文档 item_id"},
+                    "max_chars": {"type": "integer", "description": "最大返回字符数", "default": 4000},
+                },
+                "required": ["item_id"],
+            },
+            category="builtin",
+            read_only=True,
+            handler=handle_data_source_get_item,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            name="data_source_status",
+            description="诊断数据源同步状态，展示各数据源的文档数和最近错误。",
+            input_schema={"type": "object", "properties": {}},
+            category="builtin",
+            read_only=True,
+            handler=handle_data_source_status,
         )
     )
 
@@ -242,14 +285,19 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
         ),
     )
 
-    # chat-core toolset
-    chat_core_tools = ["memory_search", "memory_save", "get_profile", "update_profile", "search_external_docs"]
-
     resolver.register(
         "chat-core",
         ToolsetConfig(
             description="核心对话工具",
-            tools=chat_core_tools,
+            tools=["memory_search", "memory_save", "get_profile", "update_profile"],
+        ),
+    )
+
+    resolver.register(
+        "data-source-read",
+        ToolsetConfig(
+            description="数据源读取工具",
+            tools=["data_source_search", "data_source_list", "data_source_get_item", "data_source_status"],
         ),
     )
 
@@ -257,7 +305,7 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
         "default-chat",
         ToolsetConfig(
             description="默认对话配置",
-            includes=["chat-core", "file"],
+            includes=["chat-core", "data-source-read", "file"],
         ),
     )
 

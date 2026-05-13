@@ -112,14 +112,32 @@ class UpdateProfileArgs(TypedDict):
     expected_salary: NotRequired[str]
 
 
-# ── 外部文档工具 ──
+# ── 数据源读取工具 ──
 
 
-class SearchExternalDocsArgs(TypedDict):
-    """search_external_docs 工具的输入参数。"""
+class DataSourceSearchArgs(TypedDict):
+    """data_source_search 工具的输入参数。"""
 
     query: str
     """搜索关键词。"""
 
     limit: NotRequired[int]
     """最多返回条数。"""
+
+
+class DataSourceListArgs(TypedDict):
+    """data_source_list 工具的输入参数（无参数）。"""
+
+
+class DataSourceGetItemArgs(TypedDict):
+    """data_source_get_item 工具的输入参数。"""
+
+    item_id: str
+    """文档 item_id。"""
+
+    max_chars: NotRequired[int]
+    """最大返回字符数（默认 4000）。"""
+
+
+class DataSourceStatusArgs(TypedDict):
+    """data_source_status 工具的输入参数（无参数）。"""

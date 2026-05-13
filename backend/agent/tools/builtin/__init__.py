@@ -1,6 +1,11 @@
 """内置工具 Handlers。"""
 
-from backend.agent.tools.builtin.external import handle_search_external_docs
+from backend.agent.tools.builtin.external import (
+    handle_data_source_get_item,
+    handle_data_source_list,
+    handle_data_source_search,
+    handle_data_source_status,
+)
 from backend.agent.tools.builtin.files import (
     handle_file_list,
     handle_file_read,
@@ -17,6 +22,10 @@ from backend.agent.tools.builtin.profile import (
 )
 
 __all__ = [
+    "handle_data_source_get_item",
+    "handle_data_source_list",
+    "handle_data_source_search",
+    "handle_data_source_status",
     "handle_file_list",
     "handle_file_read",
     "handle_file_search",
@@ -24,6 +33,5 @@ __all__ = [
     "handle_get_profile",
     "handle_memory_save",
     "handle_memory_search",
-    "handle_search_external_docs",
     "handle_update_profile",
 ]
