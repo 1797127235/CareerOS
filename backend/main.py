@@ -59,10 +59,10 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(2)  # 等待 DB 完全初始化
             from sqlalchemy import select
 
-            from backend.data_sources.models import DataSource
             from backend.data_sources.registry import create_connector
             from backend.data_sources.service import create_data_source
             from backend.db import get_async_session_maker
+            from backend.domain.models.data_source import DataSource
 
             async with get_async_session_maker()() as db:
                 # 查询 active data_sources

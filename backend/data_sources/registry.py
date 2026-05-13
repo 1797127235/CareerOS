@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from backend.data_sources.models import DataSource
+from backend.domain.models.data_source import DataSource
 from backend.ingestion.connector import DataSourceConnector
 from backend.ingestion.connectors.filesystem import FilesystemConnector
 from backend.logging_config import get_logger

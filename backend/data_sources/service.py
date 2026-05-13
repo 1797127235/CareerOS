@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.data_sources.models import DataSource
 from backend.data_sources.registry import create_connector
+from backend.domain.models.data_source import DataSource
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
