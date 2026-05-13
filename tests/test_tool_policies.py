@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from backend.agent.tools.core.context import ToolRuntimeContext
-from backend.agent.tools.core.definitions import ToolDefinition
-from backend.agent.tools.core.policies import (
+from backend.modules.agent.tools.core.context import ToolRuntimeContext
+from backend.modules.agent.tools.core.definitions import ToolDefinition
+from backend.modules.agent.tools.core.policies import (
     ApprovalPolicy,
     BudgetPolicy,
     LoopGuardPolicy,
@@ -107,7 +107,7 @@ class TestLoopGuardPolicy:
         LoopGuardPolicy.record(tool, ctx, {"path": "foo.txt"}, ok=False)
         LoopGuardPolicy.record(tool, ctx, {"path": "foo.txt"}, ok=False)
 
-        ok, msg = LoopGuardPolicy.check(tool, ctx, {"path": "bar.txt"})
+        ok, _msg = LoopGuardPolicy.check(tool, ctx, {"path": "bar.txt"})
         assert ok is True
 
     def test_exploration_limit(self, ctx: ToolRuntimeContext) -> None:
@@ -137,7 +137,7 @@ class TestLoopGuardPolicy:
         # 1 次非文件工具
         LoopGuardPolicy.record(mem_tool, ctx, {"query": "test"}, ok=True)
         # 再来 1 次文件工具应允许
-        ok, msg = LoopGuardPolicy.check(file_tool, ctx, {"path": "path5"})
+        ok, _msg = LoopGuardPolicy.check(file_tool, ctx, {"path": "path5"})
         assert ok is True
 
     def test_history_truncation(self, ctx: ToolRuntimeContext) -> None:
@@ -205,7 +205,7 @@ class TestApprovalPolicy:
     def test_read_tool_no_approval(self) -> None:
         """只读工具不需要审批。"""
         tool = ToolDefinition(name="file_read", description="读取文件", read_only=True)
-        needs, reason = ApprovalPolicy.check(tool)
+        needs, _reason = ApprovalPolicy.check(tool)
         assert needs is False
 
     def test_write_tool_needs_approval(self) -> None:

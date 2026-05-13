@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from backend.db import get_async_session_maker, get_engine, init_db
-from backend.db_migrations import migrate_sqlite
-from backend.ingestion import init_pipeline
-from backend.ingestion.connectors.filesystem import FilesystemConnector
-from backend.ingestion.store import IngestionStore
-from backend.memory.search import _search_external_fts5, _search_external_like
+from backend.core.db import get_async_session_maker, get_engine, init_db
+from backend.core.migrations import migrate_sqlite
+from backend.modules.data_sources.ingestion import init_pipeline
+from backend.modules.data_sources.ingestion.connectors.local_folder import FilesystemConnector
+from backend.modules.data_sources.ingestion.store import IngestionStore
+from backend.modules.memory.search import _search_external_fts5, _search_external_like
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ async def migrated_db():
     """提供已执行过 migrate_sqlite 的内存数据库 session。"""
     init_db("sqlite+aiosqlite:///:memory:")
     engine = get_engine()
-    from backend.db import Base
+    from backend.core.db import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -324,7 +324,7 @@ async def test_pipeline_handle_delete(migrated_db) -> None:
 
 async def test_search_all_source_scope(migrated_db) -> None:
     """search_all 的 source_scope 参数应正确过滤数据源。"""
-    from backend.memory.search import search_all
+    from backend.modules.memory.search import search_all
 
     # 写入一条外部数据
     async with get_async_session_maker()() as db:

@@ -6,7 +6,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.data_sources.service import (
+from backend.modules.data_sources.service import (
     create_data_source,
     delete_data_source,
     get_data_source,
