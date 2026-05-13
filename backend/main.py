@@ -8,8 +8,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api import chat
 from backend.api.routers import config, health, memory
+from backend.api.routers.data_sources import router as data_sources_router
 from backend.config import apply_user_config, get_settings
-from backend.data_sources.routes import router as data_sources_router
 from backend.db import Base, get_engine, init_db
 from backend.db_migrations import migrate_sqlite
 from backend.domain.models import *  # noqa — 确保所有模型注册到 Base
