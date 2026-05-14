@@ -64,7 +64,7 @@ class MemorySearchArgs(TypedDict):
     """搜索关键词或时间描述。"""
 
     scope: NotRequired[str]
-    """搜索范围 — profile / emotions / reference / chat。"""
+    """搜索范围 — profile / emotions / reference / chat / knowledge。"""
 
     search_mode: NotRequired[str]
     """keyword（默认）或 grep。"""

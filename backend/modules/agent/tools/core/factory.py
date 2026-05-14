@@ -121,13 +121,16 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
                 "time_filter（仅 grep 模式生效）："
                 'today / yesterday / recent_3d / recent_7d / recent_30d / "YYYY-MM-DD~YYYY-MM-DD"'
                 "scope（仅 keyword 模式生效）："
-                "profile / emotions / reference / chat；不传则搜索全部。"
+                "profile / emotions / reference / chat / knowledge；不传则搜索全部。"
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "搜索关键词或时间描述"},
-                    "scope": {"type": "string", "description": "搜索范围 — profile / emotions / reference / chat"},
+                    "scope": {
+                        "type": "string",
+                        "description": "搜索范围 — profile / emotions / reference / chat / knowledge",
+                    },
                     "search_mode": {"type": "string", "description": "keyword（默认）或 grep", "default": "keyword"},
                     "time_filter": {
                         "type": "string",
@@ -309,5 +312,62 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
         ),
     )
 
+    # ── 注册 DocumentIndexProvider 动态工具（覆盖同名 built-in）──
+    _register_provider_tools(registry, resolver)
+
     dispatcher = ToolDispatcher(registry)
     return registry, dispatcher, resolver
+
+
+def _register_provider_tools(registry: ToolRegistry, resolver: ToolsetResolver) -> None:
+    """从当前激活的 DocumentIndexProvider 获取工具并注册到 Registry。
+
+    Provider 工具会覆盖同名 built-in 工具，实现 Hermes 对齐的可插拔搜索后端。
+    """
+    from backend.modules.data_sources.ingestion import get_document_index_provider
+
+    provider = get_document_index_provider()
+    if provider is None:
+        return
+
+    schemas = provider.get_tool_schemas()
+    if not schemas:
+        return
+
+    provider_tools: list[str] = []
+    for schema in schemas:
+        name = schema.get("name", "")
+        if not name:
+            continue
+
+        # 如果同名 built-in 已存在，先注销（Provider 优先）
+        if registry.has(name):
+            registry.unregister(name)
+
+        # 创建代理 handler：运行时委托给 provider.handle_tool_call
+        async def _provider_handler(args, ctx, _name=name, _provider=provider):
+            return await _provider.handle_tool_call(_name, args)
+
+        registry.register(
+            ToolDefinition(
+                name=name,
+                description=schema.get("description", f"{provider.name} 提供的 {name}"),
+                input_schema=schema.get("parameters", {"type": "object", "properties": {}}),
+                category="provider",
+                read_only=True,
+                handler=_provider_handler,
+            )
+        )
+        provider_tools.append(name)
+
+    # 将 Provider 工具加入 data-source-read toolset
+    if provider_tools:
+        ds_tools = resolver.get_toolset("data-source-read")
+        ds_tools.update(provider_tools)
+        resolver.register(
+            "data-source-read",
+            ToolsetConfig(
+                description="数据源读取工具（含 Provider 动态工具）",
+                tools=list(ds_tools),
+            ),
+        )

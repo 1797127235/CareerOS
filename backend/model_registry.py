@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from backend.modules.agent.models import AgentTrace
 from backend.modules.chat.models import Conversation, Message
-from backend.modules.data_sources.models import DataSource
+from backend.modules.data_sources.models import DataSource, IngestionState
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.profile.models import User, UserProfile
 
@@ -16,6 +16,7 @@ __all__ = [
     "Conversation",
     "DataSource",
     "GrowthEvent",
+    "IngestionState",
     "Message",
     "User",
     "UserProfile",
