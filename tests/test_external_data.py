@@ -39,34 +39,34 @@ async def migrated_db():
 # ── IngestionStore ──
 
 
-def test_ingestion_store_dedup():
+async def test_ingestion_store_dedup(migrated_db):
     """内容未变时不应重复索引。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = IngestionStore(Path(tmpdir) / "state.json")
         doc_id = "/notes/hello.md"
         content_hash = "abc123"
 
-        assert not store.is_indexed(doc_id, content_hash)
-        store.mark_indexed(doc_id, content_hash, "filesystem")
-        assert store.is_indexed(doc_id, content_hash)
+        assert not await store.is_indexed(doc_id, content_hash)
+        await store.mark_indexed(doc_id, content_hash, "filesystem")
+        assert await store.is_indexed(doc_id, content_hash)
         # hash 变了 → 视为未索引
-        assert not store.is_indexed(doc_id, "def456")
+        assert not await store.is_indexed(doc_id, "def456")
 
 
-def test_ingestion_store_failed_retry():
+async def test_ingestion_store_failed_retry(migrated_db):
     """失败记录应累加重试次数。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         store = IngestionStore(Path(tmpdir) / "state.json")
         doc_id = "/notes/fail.md"
 
-        assert store.get_retry_count(doc_id) == 0
-        store.mark_failed(doc_id, "DB timeout")
-        assert store.get_retry_count(doc_id) == 1
-        store.mark_failed(doc_id, "DB timeout again")
-        assert store.get_retry_count(doc_id) == 2
+        assert await store.get_retry_count(doc_id) == 0
+        await store.mark_failed(doc_id, "DB timeout")
+        assert await store.get_retry_count(doc_id) == 1
+        await store.mark_failed(doc_id, "DB timeout again")
+        assert await store.get_retry_count(doc_id) == 2
         # 成功后失败记录应被清除
-        store.mark_indexed(doc_id, "hash", "filesystem")
-        assert store.get_retry_count(doc_id) == 0
+        await store.mark_indexed(doc_id, "hash", "filesystem")
+        assert await store.get_retry_count(doc_id) == 0
 
 
 # ── FilesystemConnector ──
@@ -111,12 +111,12 @@ async def test_filesystem_connector_scan(sample_vault: Path) -> None:
     assert not any(".obsidian" in d for d in doc_ids)
 
 
-async def test_filesystem_connector_truncation(sample_vault: Path) -> None:
-    """超大文件应被截断。"""
+async def test_filesystem_connector_no_truncation(sample_vault: Path) -> None:
+    """Phase 2: Connector 不做截断，返回完整原始字节。"""
     conn = FilesystemConnector([str(sample_vault)])
-    async for doc in conn.scan():
-        if "big.txt" in doc.external_id:
-            assert len(doc.content) <= 50_000
+    async for raw in conn.scan():
+        if "big.txt" in raw.external_id:
+            assert len(raw.content_bytes) == 100_000  # 完整读取
             break
     else:
         pytest.fail("big.txt not found")
@@ -302,8 +302,9 @@ async def test_pipeline_handle_delete(migrated_db) -> None:
             await db.commit()
 
         # 标记为已索引
-        pipeline._store.mark_indexed("/x/del.md", "hdel", "filesystem")
-        assert pipeline._store.is_indexed("/x/del.md", "hdel")
+        store_key = "ds_filesystem:/x/del.md"
+        await pipeline._store.mark_indexed(store_key, "hdel", "filesystem")
+        assert await pipeline._store.is_indexed(store_key, "hdel")
 
         # 执行删除
         await pipeline.handle_delete("ds_filesystem", "/x/del.md")
@@ -319,7 +320,7 @@ async def test_pipeline_handle_delete(migrated_db) -> None:
             assert rows == 0
 
         # store 中应清理
-        assert not pipeline._store.is_indexed("/x/del.md", "hdel")
+        assert not await pipeline._store.is_indexed(store_key, "hdel")
 
 
 async def test_search_all_source_scope(migrated_db) -> None:
