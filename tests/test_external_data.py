@@ -359,3 +359,23 @@ async def test_search_all_source_scope(migrated_db) -> None:
     # all scope 应包含外部数据
     all_results = await search_all("demo_user", "scope test", limit=5, source_scope="all")
     assert any("ext:" in r.id for r in all_results)
+
+
+@pytest.mark.asyncio
+async def test_search_with_provider(mock_provider) -> None:
+    """search_all 应通过 Provider 召回语义搜索结果。"""
+    from backend.modules.memory.search import search_all
+
+    # 使用 all scope 启用 Provider 搜索
+    results = await search_all(
+        "demo_user",
+        "machine learning",
+        limit=5,
+        source_scope="all",
+        include_provider=True,
+    )
+
+    # 应有 Provider 结果（mock_provider 已索引）
+    provider_results = [r for r in results if r.id.startswith("provider:")]
+    assert len(provider_results) >= 1
+    assert "learning" in provider_results[0].content.lower()

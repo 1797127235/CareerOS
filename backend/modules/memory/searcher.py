@@ -182,8 +182,9 @@ class MemorySearcher:
         time_filter: str | None = None,
         source_scope: str = "narrative",  # "narrative" | "external" | "all"
         include_cognee: bool = False,
+        include_provider: bool = True,
     ) -> list[MemoryItem]:
-        """搜索记忆：FTS5 + 可选 Cognee 语义。
+        """搜索记忆：FTS5 + 可选 Cognee 语义 + Provider 语义。
 
         search_mode:
           - "keyword" (默认): FTS5 关键词匹配
@@ -195,6 +196,7 @@ class MemorySearcher:
 
         source_scope: 控制搜索范围 — narrative（默认）/ external / all
         include_cognee: 启用 Cognee 语义搜索
+        include_provider: 启用 DocumentIndexProvider 语义搜索（LanceDB/HRR）
         """
         if search_mode == "grep":
             time_start, time_end = _parse_time_filter(time_filter)
@@ -207,6 +209,7 @@ class MemorySearcher:
             datasets=datasets,
             source_scope=source_scope,
             include_cognee=include_cognee,
+            include_provider=include_provider,
         )
 
     async def build_context(

@@ -2,6 +2,7 @@
 
 主路径：FTS5 全文搜索（Narrative 事件 only）
 可选路径：Cognee 语义搜索（Phase 2 外部数据用）
+新增路径：DocumentIndexProvider 语义搜索（LanceDB/HRR）
 
 Profile 事件不走搜索索引 — L0 固定注入已覆盖。"""
 
@@ -22,6 +23,12 @@ logger = get_logger(__name__)
 
 _CJK_RE = _re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
 
+# Provider 结果解析正则
+_PROVIDER_RESULT_RE = _re.compile(
+    r"\[来源:\s*([^\]]+)\](?:\n|\r\n?)(.*?)(?=\n\n|\[来源:|\Z)",
+    _re.DOTALL,
+)
+
 
 class MemoryItem(BaseModel):
     """搜索结果条目。"""
@@ -39,13 +46,15 @@ async def search_all(
     *,
     datasets: list[str] | None = None,
     include_cognee: bool = False,
+    include_provider: bool = True,
     source_scope: str = "narrative",  # "narrative" | "external" | "all"
 ) -> list[MemoryItem]:
     """搜索 Narrative 事件记忆。
 
-    FTS5（全文）→ Cognee（语义，可选 Phase 2）。
+    FTS5（全文）→ Cognee（语义，可选 Phase 2）→ Provider（语义，LanceDB/HRR）。
 
-    include_cognee: 默认 False — Cognee 留作 Phase 2 外部数据接入。
+    include_cognee: 默认 False — Cognee 语义搜索。
+    include_provider: 默认 True — DocumentIndexProvider 语义搜索（LanceDB/HRR）。
     datasets=None 时 Cognee 搜全部 dataset。
     source_scope: 控制搜索范围 — narrative（默认，仅事件）/ external（仅外部文档）/ all（两者）
     """
@@ -60,6 +69,8 @@ async def search_all(
 
     if source_scope in ("external", "all"):
         results.extend(await _search_external_fts5(query, limit, seen, user_id))
+        if include_provider:
+            results.extend(await _search_provider(query, limit, seen))
 
     return results[:limit]
 
@@ -319,4 +330,43 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
                 )
     except Exception as exc:
         logger.warning("external LIKE search failed", error=str(exc))
+    return results
+
+
+async def _search_provider(query: str, limit: int, seen: set[str]) -> list[MemoryItem]:
+    """DocumentIndexProvider 语义搜索（LanceDB/HRR）。"""
+    results: list[MemoryItem] = []
+    try:
+        from backend.modules.data_sources.ingestion import get_document_index_provider
+        from backend.modules.data_sources.ingestion.providers.null import NullProvider
+
+        provider = get_document_index_provider()
+        if provider is None or isinstance(provider, NullProvider):
+            return results
+
+        text_result = await provider.prefetch(query)
+        if not text_result:
+            return results
+
+        # 解析 Provider 返回格式: [来源: doc_id]\ncontent
+        for match in _PROVIDER_RESULT_RE.finditer(text_result):
+            source_info = match.group(1).strip()
+            content = match.group(2).strip()
+            if not content or content in seen:
+                continue
+            seen.add(content)
+
+            # 提取 doc_id（格式可能是 "doc_id (相似度: 0.85)"）
+            doc_id = source_info.split("(")[0].strip()
+            results.append(
+                MemoryItem(
+                    id=f"provider:{doc_id}",
+                    content=content[:500],
+                    categories=[f"provider:{provider.name}"],
+                )
+            )
+            if len(results) >= limit:
+                break
+    except Exception as exc:
+        logger.warning("Provider search failed", error=str(exc))
     return results
