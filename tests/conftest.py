@@ -63,3 +63,31 @@ async def client(setup_db) -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def mock_provider():
+    """创建一个 mock DocumentIndexProvider 并注入到全局 Pipeline。"""
+    import tempfile
+    from pathlib import Path
+
+    from backend.modules.data_sources.ingestion.pipeline import init_pipeline
+    from backend.modules.data_sources.ingestion.providers.hrr import HRRProvider
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        provider = HRRProvider(dim=512, db_path=Path(tmpdir) / "test_hrr.json")
+        provider.initialize()
+        # 索引一些测试文档
+        await provider.sync_document(
+            "Machine learning is a subset of artificial intelligence. "
+            "It involves training models on data to make predictions.",
+            "doc1",
+        )
+        await provider.sync_document(
+            "Python is a popular programming language for data science. " "It has libraries like pandas and numpy.",
+            "doc2",
+        )
+
+        # 注入到全局 Pipeline
+        init_pipeline(Path(tmpdir), document_index_provider=provider)
+        yield provider
