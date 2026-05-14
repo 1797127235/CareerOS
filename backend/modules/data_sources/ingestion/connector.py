@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Coroutine
@@ -22,8 +23,9 @@ class RawBytes:
     metadata: dict[str, Any]
     last_modified: float
     user_id: str = "demo_user"
+    connector_type: str = "unknown"
 
-    @property
+    @functools.cached_property
     def content_hash(self) -> str:
         return hashlib.sha256(self.content_bytes).hexdigest()
 
@@ -54,6 +56,7 @@ class StructuredDocument:
     external_links: list[str]  # 外部 URL 链接
     content_hash: str
     user_id: str = "demo_user"  # 从 RawBytes / DataSource 传递
+    connector_type: str = "unknown"
 
 
 # ── Phase 1 兼容：RawDocument 保留但标记为 deprecated ──
@@ -72,7 +75,7 @@ class RawDocument:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    @property
+    @functools.cached_property
     def content_hash(self) -> str:
         return hashlib.sha256(self.content.encode()).hexdigest()
 

@@ -79,6 +79,7 @@ class MarkdownParser(DocumentParser):
             external_links=external_links,
             content_hash=raw.content_hash,
             user_id=raw.user_id,
+            connector_type=raw.connector_type,
         )
 
     def _parse_sections(self, lines: list[str]) -> list[DocumentSection]:
@@ -167,6 +168,7 @@ class PDFParser(DocumentParser):
             external_links=[],
             content_hash=raw.content_hash,
             user_id=raw.user_id,
+            connector_type=raw.connector_type,
         )
 
     def _extract_text(self, data: bytes) -> str:
@@ -242,6 +244,7 @@ class HTMLParser(DocumentParser):
             external_links=[],
             content_hash=raw.content_hash,
             user_id=raw.user_id,
+            connector_type=raw.connector_type,
         )
 
     def _extract_text(self, data: bytes) -> str:
@@ -319,6 +322,7 @@ class PlaintextParser(DocumentParser):
             external_links=[],
             content_hash=raw.content_hash,
             user_id=raw.user_id,
+            connector_type=raw.connector_type,
         )
 
 
@@ -370,4 +374,5 @@ def parse_raw_bytes(raw: RawBytes) -> StructuredDocument:
         external_links=[],
         content_hash=raw.content_hash,
         user_id=raw.user_id,
+        connector_type=raw.connector_type,
     )

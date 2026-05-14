@@ -168,6 +168,16 @@ class HRRProvider(DocumentIndexProvider):
                 return False
         return True
 
+    async def delete_document(self, doc_id: str) -> bool:
+        """删除指定 doc_id 的文档。"""
+        original_len = len(self._documents)
+        self._documents = [d for d in self._documents if d["doc_id"] != doc_id]
+        if len(self._documents) < original_len:
+            await asyncio.to_thread(self._persist)
+            logger.info("hrr.document_deleted", doc_id=doc_id)
+            return True
+        return False
+
     def _encode_text(self, text: str) -> np.ndarray | None:
         """文本 → HRR 向量。"""
         words = self._tokenize(text)

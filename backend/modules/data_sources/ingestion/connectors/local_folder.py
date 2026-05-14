@@ -146,6 +146,7 @@ class FilesystemConnector(DataSourceConnector):
                 },
                 last_modified=mtime,
                 user_id=self._user_id,
+                connector_type="local_folder",
             )
         except Exception as exc:
             logger.warning("ingestion.filesystem.read_error", path=str(path), error=str(exc))
@@ -208,7 +209,11 @@ class FilesystemConnector(DataSourceConnector):
                     self._schedule_change(event.src_path)
 
             def on_deleted(self, event):  # type: ignore[override]
-                if not event.is_directory and self._is_supported(event.src_path):
+                if (
+                    not event.is_directory
+                    and self._is_supported(event.src_path)
+                    and not self._is_hidden(Path(event.src_path))
+                ):
                     path = self._decode_path(event.src_path)
                     doc_id = str(Path(path).resolve())
                     asyncio.run_coroutine_threadsafe(on_delete(connector._data_source_id, doc_id), self._loop)
@@ -216,11 +221,11 @@ class FilesystemConnector(DataSourceConnector):
             def on_moved(self, event):  # type: ignore[override]
                 # 重命名 = 旧路径删除 + 新路径新增
                 if not event.is_directory:
-                    if self._is_supported(event.src_path):
+                    if self._is_supported(event.src_path) and not self._is_hidden(Path(event.src_path)):
                         path = self._decode_path(event.src_path)
                         doc_id = str(Path(path).resolve())
                         asyncio.run_coroutine_threadsafe(on_delete(connector._data_source_id, doc_id), self._loop)
-                    if self._is_supported(event.dest_path):
+                    if self._is_supported(event.dest_path) and not self._is_hidden(Path(event.dest_path)):
                         self._schedule_change(event.dest_path)
 
         self._observer = Observer()

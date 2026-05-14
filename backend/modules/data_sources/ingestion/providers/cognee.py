@@ -74,6 +74,11 @@ class CogneeProvider(DocumentIndexProvider):
         except Exception as exc:
             logger.error("Cognee ingest failed", doc_id=doc_id, dataset=dataset, error=str(exc))
 
+    async def delete_document(self, doc_id: str) -> bool:
+        """Cognee 不支持按 doc_id 精确删除单个文档，返回 False 并记录日志。"""
+        logger.warning("Cognee per-document deletion not supported", doc_id=doc_id)
+        return False
+
     async def clear(self) -> bool:
         """清空 Cognee 索引（删除底层存储目录并重新初始化）。"""
         try:

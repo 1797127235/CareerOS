@@ -148,22 +148,22 @@ class IngestionPipeline:
             logger.warning("ingestion.parse_failed", external_id=raw.external_id, error=str(exc))
             return False
 
+        last_error = ""
         for attempt in range(1, MAX_RETRY + 1):
             try:
                 await self._write_to_db(doc)
-                # 记忆入队，不阻塞 DB 写入；队列满时自动背压
-                await self._memory_queue.put(doc)
                 return True
             except Exception as exc:
+                last_error = str(exc)
                 logger.warning(
                     "ingestion.write_failed",
                     external_id=doc.external_id,
                     attempt=attempt,
-                    error=str(exc),
+                    error=last_error,
                 )
-                await self._store.mark_failed(store_key, str(exc))
                 if attempt < MAX_RETRY:
                     await jittered_sleep(attempt)
+        await self._store.mark_failed(store_key, last_error)
         return False
 
     async def _write_to_db(self, doc: StructuredDocument) -> None:
@@ -211,7 +211,7 @@ class IngestionPipeline:
                         "id": item_id,
                         "user_id": doc.user_id,
                         "ds_id": doc.data_source_id,
-                        "ctype": doc.data_source_id,
+                        "ctype": doc.connector_type,
                         "source_id": doc.data_source_id,
                         "doc_id": doc.external_id,
                         "ext_id": doc.external_id,
@@ -224,10 +224,11 @@ class IngestionPipeline:
                 )
             await db.commit()
 
-        # DB flush 成功后，才 mark_indexed（Fix 1：防止进程崩溃丢数据）
+        # DB flush 成功后，才 mark_indexed + 语义索引入队（Fix 2：防止 DB 未 commit 就索引）
         for doc in batch:
             store_key = f"{doc.data_source_id}:{doc.external_id}"
             await self._store.mark_indexed(store_key, doc.content_hash, doc.data_source_id)
+            await self._memory_queue.put(doc)
 
         self._batch.clear()
         logger.info("ingestion.batch_flushed", count=len(batch))
@@ -268,7 +269,7 @@ class IngestionPipeline:
         await self._ingest_with_retry(raw)
 
     async def handle_delete(self, data_source_id: str, external_id: str) -> None:
-        """文件删除回调：从 external_items 移除并清理 store。"""
+        """文件删除回调：从 external_items、store、语义索引中移除。"""
         async with get_async_session_maker()() as db:
             await db.execute(
                 text("DELETE FROM external_items WHERE data_source_id=:dsid AND external_id=:eid"),
@@ -277,6 +278,7 @@ class IngestionPipeline:
             await db.commit()
         store_key = f"{data_source_id}:{external_id}"
         await self._store.remove(store_key)
+        await self._memory.delete_document(external_id)
         logger.info("ingestion.deleted", data_source_id=data_source_id, external_id=external_id)
 
     async def cleanup_deleted(self, data_source_id: str, existing_ids: set[str]) -> int:
@@ -301,6 +303,7 @@ class IngestionPipeline:
 
         for ext_id in to_delete:
             await self._store.remove(f"{data_source_id}:{ext_id}")
+            await self._memory.delete_document(ext_id)
 
         logger.info("ingestion.cleanup_deleted", data_source_id=data_source_id, count=deleted)
         return deleted

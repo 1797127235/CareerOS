@@ -59,6 +59,10 @@ class DocumentIndexProvider(ABC):
         """清空所有索引数据。返回是否成功。默认空操作。"""
         return True
 
+    async def delete_document(self, doc_id: str) -> bool:
+        """删除指定文档的索引。返回是否成功。默认空操作。"""
+        return True
+
     async def handle_tool_call(self, name: str, args: dict) -> str:
         """处理 Agent 的工具调用。默认抛异常。"""
         raise NotImplementedError(f"Tool {name} not supported by {self.name}")

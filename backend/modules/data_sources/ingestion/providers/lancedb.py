@@ -142,6 +142,18 @@ class LanceDBProvider(DocumentIndexProvider):
             logger.error("lancedb.clear_failed", error=str(exc))
             return False
 
+    async def delete_document(self, doc_id: str) -> bool:
+        """删除指定 doc_id 的所有 chunks。"""
+        if self._table is None:
+            return False
+        try:
+            self._table.delete(f"doc_id = '{doc_id}'")
+            logger.info("lancedb.document_deleted", doc_id=doc_id)
+            return True
+        except Exception as exc:
+            logger.error("lancedb.delete_failed", doc_id=doc_id, error=str(exc))
+            return False
+
     def _chunk_text(self, text: str, chunk_size: int = 512, overlap: int = 50) -> list[str]:
         """简单 overlap 分块。"""
         return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]

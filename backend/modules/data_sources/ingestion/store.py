@@ -22,6 +22,9 @@ from backend.modules.data_sources.models import IngestionState
 
 logger = get_logger(__name__)
 
+# 超过此重试次数后标记为永久失败，不再重试（3 次重试/启动 × 3 启动 = 9）
+MAX_PERMANENT_FAILURE_COUNT = 9
+
 
 class IngestionStore:
     """追踪外部文档的索引状态。
@@ -55,12 +58,26 @@ class IngestionStore:
     async def is_indexed(self, doc_id: str, content_hash: str) -> bool:
         data_source_id, external_id = self._parse_key(doc_id)
         async with get_async_session_maker()() as db:
+            # 已索引 → 跳过
             result = await db.execute(
                 select(IngestionState).where(
                     IngestionState.data_source_id == data_source_id,
                     IngestionState.external_id == external_id,
                     IngestionState.content_hash == content_hash,
                     IngestionState.status == "indexed",
+                )
+            )
+            if result.scalar_one_or_none() is not None:
+                return True
+
+            # 永久失败（超过最大重试次数）→ 也跳过
+            result = await db.execute(
+                select(IngestionState).where(
+                    IngestionState.data_source_id == data_source_id,
+                    IngestionState.external_id == external_id,
+                    IngestionState.content_hash == content_hash,
+                    IngestionState.status == "failed",
+                    IngestionState.retry_count >= MAX_PERMANENT_FAILURE_COUNT,
                 )
             )
             return result.scalar_one_or_none() is not None

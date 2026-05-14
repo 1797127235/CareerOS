@@ -58,6 +58,8 @@ async def _bootstrap_ingestion() -> None:
     不再从 .env 的 EXTERNAL_DATA_DIRS 自动创建（避免 unsolicited ingestion）。
     """
     try:
+        # Cognee 在后台线程初始化（_init_cognee），给 2 秒 grace period
+        # 避免 ingestion 启动时 Cognee 还没 ready。后续可改为显式事件通知。
         await asyncio.sleep(2)
         store_dir = USER_DATA_DIR
         store_dir.mkdir(exist_ok=True)

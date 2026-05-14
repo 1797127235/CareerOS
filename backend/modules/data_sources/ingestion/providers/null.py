@@ -35,5 +35,8 @@ class NullProvider(DocumentIndexProvider):
     async def clear(self) -> bool:
         return True
 
+    async def delete_document(self, doc_id: str) -> bool:
+        return True
+
     def get_tool_schemas(self) -> list[dict]:
         return []
