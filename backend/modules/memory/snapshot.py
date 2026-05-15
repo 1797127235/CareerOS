@@ -2,7 +2,7 @@
 
 L0 固定块：用户画像聚合（Profile GrowthEvent → about_you.md / 字段拼接）
 L1 近期上下文：最近对话的摘要（Conversation + Message，非原始事件）
-L2 语义召回：FTS5 / Cognee 检索 Narrative 事件（由 facade.build_context 触发）
+L2 语义召回：FTS5 / Provider 检索 Narrative 事件（由 facade.build_context 触发）
 
 双管线架构：
 - Profile 事件（profile/skill/goal/preference/status）→ L0 only，不进搜索索引
@@ -12,14 +12,15 @@ L2 语义召回：FTS5 / Cognee 检索 Narrative 事件（由 facade.build_conte
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
-from backend.modules.chat.models import Conversation, Message
 
 logger = get_logger(__name__)
 
@@ -30,6 +31,35 @@ _CONTEXT_MAX_CHARS = 600
 
 _CACHE_TTL_MINUTES = 5
 _MAX_CACHE_SIZE = 100
+
+
+@dataclass
+class ConversationContext:
+    """近期对话上下文 — 解耦 snapshot.py 与 chat 模块的 ORM 模型。"""
+
+    conversation_id: str
+    title: str | None
+    summary: str | None
+    messages: list[dict[str, str]]
+
+
+ConversationFetcher = Callable[[str, Any], Awaitable[list[ConversationContext]]]
+"""获取近期对话上下文的 fetcher 协议。
+
+通过 `set_conversation_fetcher()` 注入自定义实现，默认使用内部延迟导入的查询逻辑。
+"""
+
+_conversation_fetcher: ConversationFetcher | None = None
+
+
+def set_conversation_fetcher(fetcher: ConversationFetcher) -> None:
+    """注入自定义的对话上下文获取器。
+
+    由 chat 模块在初始化时调用，将查询逻辑从 snapshot.py 中彻底解耦。
+    未注入时，snapshot.py 使用内部默认实现（延迟导入 chat 模型）。
+    """
+    global _conversation_fetcher
+    _conversation_fetcher = fetcher
 
 
 @dataclass
@@ -116,51 +146,49 @@ def _has_substantive_content(text: str) -> bool:
     return len(stripped) > _MIN_ABOUT_YOU_CHARS
 
 
-# ── L1: 近期上下文（数据源 = Conversation + Message）────────────
+# ── L1: 近期上下文（数据源 = Conversation + Message，通过依赖注入解耦）──
 
 
-def _build_context_block(
-    conversations: list[Conversation],
-    messages_by_conv: dict[str, list[Message]],
-) -> tuple[str, set[str]]:
+def _build_context_block(contexts: list[ConversationContext]) -> tuple[str, set[str]]:
     """从最近对话中提取上下文摘要。
 
     与 L0 不同：L0 来自 about_you.md（「用户是谁」），
     L1 从对话记录提取「最近在聊什么」— 数据源分离，避免重复注入。
     """
-    if not conversations:
+    if not contexts:
         return "", set()
 
     lines: list[str] = ["## 近期对话"]
     conv_ids: set[str] = set()
     total_chars = 0
 
-    for conv in conversations:
+    for ctx in contexts:
         if total_chars >= _CONTEXT_MAX_CHARS:
             break
 
-        msgs = messages_by_conv.get(conv.conversation_id, [])
+        msgs = ctx.messages
         if not msgs:
             continue
 
         # 对话标题（优先用 title，否则用第一条用户消息截断）
-        title = conv.title
+        title = ctx.title
         if not title:
-            user_msgs = [m for m in msgs if m.role == "user"]
+            user_msgs = [m for m in msgs if m.get("role") == "user"]
             if user_msgs:
-                title = (user_msgs[0].content or "")[:40]
+                title = (user_msgs[0].get("content") or "")[:40]
             else:
                 title = "未命名对话"
 
         # 对话摘要（如果有 LLM 生成的 summary）
-        if conv.summary:
-            line = f"- **{title}**：{conv.summary[:80]}"
+        if ctx.summary:
+            line = f"- **{title}**：{ctx.summary[:80]}"
         else:
             # 取最近几条消息的内容片段
             msg_parts: list[str] = []
             for msg in msgs[:_CONTEXT_MAX_MESSAGES_PER_CONV]:
-                if msg.content:
-                    msg_parts.append(msg.content[:60])
+                content = msg.get("content")
+                if content:
+                    msg_parts.append(content[:60])
             content_hint = "；".join(msg_parts)
             line = f"- **{title}**：{content_hint[:80]}" if content_hint else f"- **{title}**"
 
@@ -168,7 +196,7 @@ def _build_context_block(
             line = line[:117] + "…"
 
         lines.append(line)
-        conv_ids.add(conv.conversation_id)
+        conv_ids.add(ctx.conversation_id)
         total_chars += len(line)
 
     if len(lines) <= 1:  # 只有标题行
@@ -177,12 +205,12 @@ def _build_context_block(
     return "\n".join(lines), conv_ids
 
 
-async def _fetch_recent_conversations(
-    user_id: str,
-    db,
-) -> tuple[list[Conversation], dict[str, list[Message]]]:
-    """查询最近 N 天的对话及其最新消息。"""
+async def _default_fetch_recent_conversations(user_id: str, db) -> list[ConversationContext]:
+    """默认 fetcher：延迟导入 chat 模型，转换为 ConversationContext。"""
     cutoff = datetime.now(UTC) - timedelta(days=_CONTEXT_MAX_AGE_DAYS)
+
+    # 延迟导入避免 import-time 跨模块耦合
+    from backend.modules.chat.models import Conversation, Message
 
     # 取最近的对话
     conv_stmt = (
@@ -199,7 +227,7 @@ async def _fetch_recent_conversations(
     conversations = list(conv_result.scalars().all())
 
     if not conversations:
-        return [], {}
+        return []
 
     # 取每个对话的最新消息
     conv_ids = [c.conversation_id for c in conversations]
@@ -214,7 +242,29 @@ async def _fetch_recent_conversations(
         if len(msgs) < _CONTEXT_MAX_MESSAGES_PER_CONV:
             msgs.append(msg)
 
-    return conversations, messages_by_conv
+    contexts: list[ConversationContext] = []
+    for conv in conversations:
+        msgs = messages_by_conv.get(conv.conversation_id, [])
+        contexts.append(
+            ConversationContext(
+                conversation_id=conv.conversation_id,
+                title=conv.title,
+                summary=conv.summary,
+                messages=[{"role": m.role, "content": m.content or ""} for m in msgs],
+            )
+        )
+
+    return contexts
+
+
+async def _fetch_recent_conversations(user_id: str, db) -> list[ConversationContext]:
+    """获取近期对话上下文。
+
+    优先使用注入的 fetcher，未注入时使用默认实现（延迟导入 chat 模型）。
+    """
+    if _conversation_fetcher is not None:
+        return await _conversation_fetcher(user_id, db)
+    return await _default_fetch_recent_conversations(user_id, db)
 
 
 # ── 构建快照 ──────────────────────────────────────────────────────
@@ -240,15 +290,15 @@ async def build_snapshot(user_id: str) -> str:
     fixed_block = _build_fixed_block(user_id)
 
     async with get_async_session_maker()() as db:
-        conversations, messages_by_conv = await _fetch_recent_conversations(user_id, db)
+        contexts = await _fetch_recent_conversations(user_id, db)
 
-    if not fixed_block and not conversations:
+    if not fixed_block and not contexts:
         content = "【用户画像为空】"
         await _cache_insert(_CacheEntry(user_id=user_id, content=content, created_at=datetime.now(UTC)))
         return content
 
     # L1 近期上下文
-    context_block, conv_ids = _build_context_block(conversations, messages_by_conv)
+    context_block, conv_ids = _build_context_block(contexts)
 
     parts = [p for p in [fixed_block, context_block] if p]
     content = "\n\n".join(parts) if parts else "【用户画像为空】"

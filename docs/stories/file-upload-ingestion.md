@@ -1,5 +1,18 @@
 # Story: 文件上传与知识导入
 
+> **状态：未实现 + 架构漂移**
+>
+> 本 Story 描述的功能（UploadedFile ORM、独立 Knowledge 页面、`/api/knowledge/*` 端点）**尚未在代码中实现**。
+>
+> 此外，本 Story 设计时依赖的以下组件**已移除或不存在**：
+> - `backend/memory/semantic_store.py`（已删除，语义索引由 `DocumentIndexProvider` 接管）
+> - `backend/memory/datasets.py`（已删除）
+> - `backend/memory/documents.py`（不存在）
+> - `backend/memory/chunker.py`（不存在，分块由 `LanceDBProvider` 内部处理）
+> - `backend/memory/parsers.py`（不存在，解析由 `IngestionPipeline` 的 `parse_raw_bytes` 处理）
+>
+> 若未来实施，建议复用现有 `IngestionPipeline` + `DocumentIndexProvider` 架构，而非直接依赖 Cognee。
+
 ## 背景
 
 Lumen 当前只能通过对话交互积累记忆。用户无法把已有的资料（简历、笔记、文档）直接喂给 Lumen。

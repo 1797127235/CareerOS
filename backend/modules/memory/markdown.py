@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import USER_DATA_DIR
@@ -16,6 +18,7 @@ from backend.core.logging import get_logger
 from backend.modules.memory.events_merger import (
     _build_experiences_section,
     _build_skills_section,
+    deep_merge,
     generate_memory_md,
     merge_decision_events,
     merge_dict_events,
@@ -120,6 +123,32 @@ def _write_default_md_snapshot(user_id: str) -> None:
     _write_md_file_safe(str(memory_dir(user_id) / "memory.md"), memory_default())
 
 
+def _projection_cache_path(user_id: str) -> Path:
+    return memory_dir(user_id) / "projection_cache.json"
+
+
+def _load_projection_cache(user_id: str) -> dict | None:
+    path = _projection_cache_path(user_id)
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_projection_cache(user_id: str, data: dict) -> None:
+    ensure_memory_dirs(user_id)
+    path = _projection_cache_path(user_id)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=str(path.parent), suffix=".tmp", delete=False
+    ) as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        temp = f.name
+    os.replace(temp, path)
+
+
 async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
     try:
         result = await db.execute(
@@ -129,6 +158,19 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
 
         if not events:
             _write_default_md_snapshot(user_id)
+            # 写入空缓存，避免后续增量更新回退
+            _save_projection_cache(
+                user_id,
+                {
+                    "profile": {},
+                    "skills": {},
+                    "experiences": [],
+                    "preferences": {},
+                    "status": {},
+                    "goals": {},
+                    "decisions": [],
+                },
+            )
             logger.debug("No events found; rebuilt default markdown", user_id=user_id)
             return True
 
@@ -162,7 +204,19 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
 
         _write_md_file_safe(str(d / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
 
-        from datetime import UTC, datetime
+        # 保存缓存供增量更新使用
+        _save_projection_cache(
+            user_id,
+            {
+                "profile": profile,
+                "skills": skills,
+                "experiences": experiences,
+                "preferences": preferences,
+                "status": status,
+                "goals": goals,
+                "decisions": decisions,
+            },
+        )
 
         now = datetime.now(UTC)
         for event in events:
@@ -179,6 +233,81 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
         return True
     except Exception as exc:
         logger.error(".md projection failed", user_id=user_id, error=str(exc))
+        return False
+
+
+async def _incremental_update_md(db: AsyncSession, user_id: str, dirty_events: list[GrowthEvent]) -> bool:
+    """增量更新 memory.md：只合并 dirty 事件到缓存数据，重新生成文件。
+
+    前提：projection_cache.json 存在且有效；否则回退到 project_user_to_md。
+    """
+    cache = _load_projection_cache(user_id)
+    if cache is None:
+        logger.info("Projection cache missing; falling back to full rebuild", user_id=user_id)
+        return await project_user_to_md(db, user_id)
+
+    try:
+        dirty_by_type: dict[str, list[GrowthEvent]] = defaultdict(list)
+        for event in dirty_events:
+            dirty_by_type[event.event_type].append(event)
+
+        profile_updates = merge_profile_events(dirty_by_type.get("profile_updated", []))
+        skills_updates = merge_skill_events(
+            dirty_by_type.get("skill_added", []) + dirty_by_type.get("skill_level_changed", [])
+        )
+        exp_updates = merge_experience_events(dirty_by_type.get("experience_added", []))
+        pref_updates = merge_dict_events(dirty_by_type.get("preference_learned", []))
+        status_updates = merge_dict_events(dirty_by_type.get("status_changed", []))
+        goals_updates = merge_dict_events(dirty_by_type.get("goal_updated", []))
+        decision_updates = merge_decision_events(dirty_by_type.get("decision_made", []))
+
+        profile = deep_merge(cache.get("profile", {}), profile_updates)
+        skills = {**cache.get("skills", {}), **skills_updates}
+        experiences = cache.get("experiences", []) + exp_updates
+        preferences = {**cache.get("preferences", {}), **pref_updates}
+        status = {**cache.get("status", {}), **status_updates}
+        goals = {**cache.get("goals", {}), **goals_updates}
+        decisions = cache.get("decisions", []) + decision_updates
+
+        core = generate_memory_md(profile, preferences, status, goals, decisions)
+        skills_section = _build_skills_section(skills)
+        exp_section = _build_experiences_section(experiences)
+
+        combined = core
+        for section in [skills_section, exp_section]:
+            if section:
+                combined += "\n\n" + section
+
+        _write_md_file_safe(str(memory_dir(user_id) / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
+
+        _save_projection_cache(
+            user_id,
+            {
+                "profile": profile,
+                "skills": skills,
+                "experiences": experiences,
+                "preferences": preferences,
+                "status": status,
+                "goals": goals,
+                "decisions": decisions,
+            },
+        )
+
+        now = datetime.now(UTC)
+        for event in dirty_events:
+            event.projected_md_at = now
+        await db.flush()
+
+        logger.info(
+            ".md projection incremental update complete",
+            user_id=user_id,
+            dirty_events=len(dirty_events),
+            skills=len(skills),
+            experiences=len(experiences),
+        )
+        return True
+    except Exception as exc:
+        logger.error("Incremental .md projection failed", user_id=user_id, error=str(exc))
         return False
 
 
@@ -215,7 +344,7 @@ def write_about_you(user_id: str, content: str, *, event_count: int = 0) -> None
     )
 
 
-_INCREMENTAL_DIRTY_THRESHOLD = 0  # 保留常量消除 magic number；dirty > 0 即全量重建
+_INCREMENTAL_DIRTY_THRESHOLD = 5  # dirty < 5 走增量更新；>= 5 全量重建
 
 
 async def sync_user_md_projection(user_id: str, *, db: AsyncSession | None = None) -> bool:
@@ -223,12 +352,15 @@ async def sync_user_md_projection(user_id: str, *, db: AsyncSession | None = Non
 
     db 传入:   使用指定 session（调用方负责 commit/rollback）。
     db=None:   自开 session + commit。
-    """
-    from sqlalchemy import func as _func
 
+    策略：
+    - dirty == 0: 无需更新
+    - 0 < dirty < _INCREMENTAL_DIRTY_THRESHOLD: 增量更新（读 dirty 事件 + 缓存，O(dirty)）
+    - dirty >= _INCREMENTAL_DIRTY_THRESHOLD: 全量重建（读全部历史事件，O(n)）
+    """
     if db is not None:
         dirty_count = await db.execute(
-            select(_func.count(GrowthEvent.id)).where(
+            select(func.count(GrowthEvent.id)).where(
                 GrowthEvent.user_id == user_id,
                 GrowthEvent.projected_md_at.is_(None),
             )
@@ -236,6 +368,19 @@ async def sync_user_md_projection(user_id: str, *, db: AsyncSession | None = Non
         dirty = dirty_count.scalar() or 0
         if dirty == 0:
             return True
+
+        if dirty < _INCREMENTAL_DIRTY_THRESHOLD:
+            result = await db.execute(
+                select(GrowthEvent)
+                .where(
+                    GrowthEvent.user_id == user_id,
+                    GrowthEvent.projected_md_at.is_(None),
+                )
+                .order_by(GrowthEvent.created_at.asc())
+            )
+            dirty_events = list(result.scalars().all())
+            return await _incremental_update_md(db, user_id, dirty_events)
+
         return await project_user_to_md(db, user_id)
 
     async with get_async_session_maker()() as db:

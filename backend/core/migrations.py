@@ -106,11 +106,14 @@ async def migrate_sqlite(conn) -> None:
         "ALTER TABLE growth_events ADD COLUMN payload_hash VARCHAR(64)",
         "ALTER TABLE growth_events ADD COLUMN projected_md_at DATETIME",
         "ALTER TABLE growth_events ADD COLUMN projected_cognee_at DATETIME",
+        "ALTER TABLE growth_events ADD COLUMN projected_provider_at DATETIME",
+        # 迁移旧数据：将 projected_cognee_at 的值复制到 projected_provider_at
+        "UPDATE growth_events SET projected_provider_at = projected_cognee_at WHERE projected_provider_at IS NULL AND projected_cognee_at IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS ix_growth_events_user_event ON growth_events (user_id, event_type)",
         "CREATE INDEX IF NOT EXISTS ix_growth_events_user_entity ON growth_events (user_id, entity_type, entity_id)",
         "CREATE INDEX IF NOT EXISTS ix_growth_events_dedupe ON growth_events (user_id, dedupe_key)",
         "CREATE INDEX IF NOT EXISTS ix_growth_events_unprojected_md ON growth_events (user_id, projected_md_at)",
-        "CREATE INDEX IF NOT EXISTS ix_growth_events_unprojected_cognee ON growth_events (user_id, projected_cognee_at)",
+        "CREATE INDEX IF NOT EXISTS ix_growth_events_unprojected_provider ON growth_events (user_id, projected_provider_at)",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_growth_events_user_dedupe ON growth_events (user_id, dedupe_key)",
         # ── data_sources: 用户数据源连接（Phase 2b）──
         """CREATE TABLE IF NOT EXISTS data_sources (

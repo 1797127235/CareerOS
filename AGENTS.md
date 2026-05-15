@@ -37,7 +37,7 @@ career-os/
 │   │   ├── db.py               # SQLAlchemy AsyncEngine + Base + get_async_session_maker
 │   │   ├── logging.py          # 结构化日志配置
 │   │   ├── migrations.py       # SQLite 兼容迁移、FTS5 表、触发器
-│   │   └── startup.py          # 启动初始化（建表、Cognee、IngestionPipeline）
+│   │   └── startup.py          # 启动初始化（建表、IngestionPipeline、DocumentIndexProvider）
 │   ├── shared/                 # 跨模块通用工具
 │   │   ├── date_utils.py       # 日期工具
 │   │   ├── json_utils.py       # JSON 工具
@@ -89,8 +89,6 @@ career-os/
 │       │   ├── snapshot.py     # Agent 系统提示词分层快照（L0/L1/L2）
 │       │   ├── events_merger.py  # 事件合并与 memory.md 生成（纯函数层）
 │       │   ├── understanding.py  # AI 综合画像生成（about_you.md，LLM 驱动）
-│       │   ├── cognify_loop.py   # Cognee 初始化 + 后台 cognify 循环
-│       │   ├── datasets.py       # Cognee dataset 常量
 │       │   ├── router.py         # 记忆管理 API 路由（16 个端点）
 │       │   └── review_service.py # 后台记忆审查（Agent fork 审查对话）
 │       ├── profile/            # 画像模块
@@ -112,17 +110,15 @@ career-os/
 │           └── ingestion/      # 接入管道
 │               ├── connector.py         # DataSourceConnector ABC + RawDocument
 │               ├── pipeline.py          # IngestionPipeline（扫描 → 索引状态机）
-│               ├── store.py             # IngestionStore（JSON 原子写入，dedup 状态）
+│               ├── store.py             # IngestionStore（SQLite 表存储，dedup 状态）
 │               ├── parser.py            # 文档解析（PDF/Word/Markdown）
 │               ├── retry.py             # jittered_retry 装饰器
 │               ├── document_index_provider.py  # DocumentIndexProvider 抽象
-│               ├── provider_factory.py  # Provider 工厂（LanceDB / Cognee / HRR / Null）
+│               ├── provider_factory.py  # Provider 工厂（LanceDB / Null）
 │               ├── connectors/
 │               │   └── local_folder.py  # LocalFolderConnector（.md/.txt 扫描 + watchdog）
 │               └── providers/
-│                   ├── lancedb.py       # LanceDB 向量存储
-│                   ├── cognee.py        # Cognee 语义索引
-│                   ├── hrr.py           # HRR 语义哈希
+│                   ├── lancedb.py       # LanceDB 向量存储（语义搜索实现）
 │                   └── null.py          # 空实现（缺省降级）
 ├── src/                        # React 前端（Vite）
 │   ├── App.tsx
@@ -169,7 +165,7 @@ career-os/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | 健康检查（含 Cognee 状态） |
+| `GET` | `/api/health` | 健康检查（含 DocumentIndexProvider 状态） |
 | `POST` | `/api/chat` | SSE 流式对话（Agent Loop），body: `{ message, conversation_id?, user_id? }` |
 | `GET` | `/api/chat/history?user_id=&limit=` | 对话历史列表 |
 | `GET` | `/api/chat/{conversation_id}` | 单条会话消息详情 |
@@ -178,7 +174,7 @@ career-os/
 | `GET` | `/api/memory/stats?user_id=` | 记忆统计（状态、事件数） |
 | `GET` | `/api/memory/list?user_id=` | 记忆列表 |
 | `POST` | `/api/memory/reset?user_id=` | 清空用户记忆 |
-| `POST` | `/api/memory/rebuild` | 重建记忆（.md + Cognee） |
+| `POST` | `/api/memory/rebuild` | 重建记忆（.md + FTS5 + Provider 语义索引） |
 | `GET` | `/api/memory/search` | 语义搜索记忆 |
 | `DELETE` | `/api/memory/{event_id}` | 删除指定记忆事件 |
 | `POST` | `/api/memory/upload-resume` | 上传简历解析并生成事件 |
@@ -197,7 +193,7 @@ career-os/
 - **Agent 系统**：PydanticAI 实现（`modules/agent/pydantic_agent.py`），支持工具调用、动态系统提示词、流式输出
 - **工具系统**：分层架构 — `ToolDefinition`（元数据）→ `ToolRegistry`（注册表）→ `ToolDispatcher`（分发）→ `Toolset`（组合），内置工具在 `modules/agent/tools/builtin/`，安全策略在 `modules/agent/tools/core/policies.py`
 - **LLM 路由**：`pydantic_agent.py` 内 `_create_model()` 支持多 Provider（DashScope/OpenAI/DeepSeek 等），通过 LiteLLM 统一调用
-- **记忆层**：双管线 — Profile 事件（→ `.md` 投影）+ Narrative 事件（→ FTS5 `growth_events_fts`）；Cognee 提供语义搜索；`external_items` 表（Phase 2a）存储外部文档索引
+- **记忆层**：双管线 — Profile 事件（→ `.md` 投影）+ Narrative 事件（→ FTS5 `growth_events_fts`）；LanceDB 提供语义搜索（`DocumentIndexProvider` 可插拔）；`external_items` 表（Phase 2a）存储外部文档索引
 - **数据库**：SQLite（`lumen.db`），`core/migrations.py` 集中管理所有 DDL（含 FTS5 虚拟表与触发器），`lifespan` 中调用 `migrate_sqlite()`
 - **画像数据模型**：扩展字段存入 `profile_data` JSON 列，零 ORM 列新增
 - **聊天状态**：`chatSession.tsx` 全局 Context Provider，跨页面保持对话状态

@@ -1,7 +1,7 @@
 """统一搜索层 — 从多个存储源召回记忆。
 
 三条搜索管线并行运行，结果合并去重：
-  - Provider 语义搜索（Cognee/LanceDB/HRR）— 覆盖 narrative 事件 + 外部文档
+  - Provider 语义搜索（LanceDB）— 覆盖 narrative 事件 + 外部文档
   - FTS5 关键词搜索（growth_events_fts）— Narrative 事件全文检索
   - FTS5 关键词搜索（external_items_fts）— 外部文档全文检索
 
@@ -9,7 +9,9 @@ Profile 事件不走搜索索引 — L0 固定注入已覆盖。"""
 
 from __future__ import annotations
 
+import asyncio
 import re as _re
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -37,31 +39,36 @@ async def search_all(
     user_id: str,
     query: str,
     limit: int = 10,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
 ) -> list[MemoryItem]:
     """统一搜索：Provider（语义）+ FTS5（关键词），三路并行合并去重。
 
     不再区分数据来源 — 搜索全部数据，靠 categories 字段标识来源。
     Provider 不可用时自动降级（NullProvider 返回空列表）。
+
+    time_start/time_end: 可选时间范围过滤（UTC datetime）。
     """
+    # 三路并行搜索，各数据源独立召回，最后统一去重
+    provider_results, fts5_results, ext_results = await asyncio.gather(
+        _search_provider(query, limit, time_start=time_start, time_end=time_end),
+        _search_fts5(user_id, query, limit, time_start=time_start, time_end=time_end),
+        _search_external_fts5(query, limit, user_id, time_start=time_start, time_end=time_end),
+    )
+
     seen: set[str] = set()
     results: list[MemoryItem] = []
 
-    # Provider 语义搜索 — 覆盖 narrative 事件 + 外部文档
-    provider_results = await _search_provider(query, limit)
     for item in provider_results:
         if item.id not in seen:
             seen.add(item.id)
             results.append(item)
 
-    # FTS5 关键词 — narrative 事件
-    fts5_results = await _search_fts5(user_id, query, limit, seen)
     for item in fts5_results:
         if item.id not in seen:
             seen.add(item.id)
             results.append(item)
 
-    # FTS5 关键词 — 外部文档
-    ext_results = await _search_external_fts5(query, limit, seen, user_id)
     for item in ext_results:
         if item.id not in seen:
             seen.add(item.id)
@@ -86,7 +93,13 @@ def _escape_fts5(query: str) -> str | None:
     return cleaned or None
 
 
-async def _search_fts5(user_id: str, query: str, limit: int, seen: set[str]) -> list[MemoryItem]:
+async def _search_fts5(
+    user_id: str,
+    query: str,
+    limit: int,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
+) -> list[MemoryItem]:
     """SQLite FTS5 全文搜索 — 仅搜索 Narrative 事件。"""
     results: list[MemoryItem] = []
     safe_query = _escape_fts5(query)
@@ -95,23 +108,26 @@ async def _search_fts5(user_id: str, query: str, limit: int, seen: set[str]) -> 
     try:
         fts_table = "growth_events_fts_trigram" if _CJK_RE.search(query) else "growth_events_fts"
         async with get_async_session_maker()() as db:
+            params = {
+                "uid": user_id,
+                "etypes": tuple(NARRATIVE_EVENT_TYPES),
+                "q": safe_query,
+                "lim": limit,
+            }
+            if time_start:
+                params["time_start"] = time_start
+            if time_end:
+                params["time_end"] = time_end
+
             rows = (
                 await db.execute(
-                    _fts_query(fts_table),
-                    {
-                        "uid": user_id,
-                        "etypes": tuple(NARRATIVE_EVENT_TYPES),
-                        "q": safe_query,
-                        "lim": limit,
-                    },
+                    _fts_query(fts_table, time_start=time_start, time_end=time_end),
+                    params,
                 )
             ).all()
 
             for row in rows:
                 eid = str(row[0])
-                if eid in seen:
-                    continue
-                seen.add(eid)
                 results.append(
                     MemoryItem(
                         id=eid,
@@ -125,8 +141,18 @@ async def _search_fts5(user_id: str, query: str, limit: int, seen: set[str]) -> 
     return results
 
 
-def _fts_query(table_name: str):
+def _fts_query(table_name: str, time_start: datetime | None = None, time_end: datetime | None = None):
     from sqlalchemy import bindparam
+
+    time_clauses = []
+    if time_start:
+        time_clauses.append("ge.created_at >= :time_start")
+    if time_end:
+        time_clauses.append("ge.created_at < :time_end")
+
+    time_where = ""
+    if time_clauses:
+        time_where = " AND " + " AND ".join(time_clauses)
 
     return text(f"""
         SELECT ge.id, ge.payload_json, ge.event_type, ge.entity_type, ge.created_at
@@ -135,12 +161,19 @@ def _fts_query(table_name: str):
         WHERE ge.user_id = :uid
           AND ge.event_type IN :etypes
           AND {table_name} MATCH :q
+          {time_where}
         ORDER BY ge.created_at DESC
         LIMIT :lim
     """).bindparams(bindparam("etypes", expanding=True))
 
 
-async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id: str | None = None) -> list[MemoryItem]:
+async def _search_external_fts5(
+    query: str,
+    limit: int,
+    user_id: str | None = None,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
+) -> list[MemoryItem]:
     """FTS5 全文搜索 external_items — Phase 2 外部数据。
     CJK 短查询（1-2 字）走 LIKE fallback，因为 trigram tokenizer
     至少需要 3 个字符才能命中。3 字及以上走 FTS5。
@@ -153,7 +186,7 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
         is_cjk = bool(_CJK_RE.search(query))
         # CJK 短查询（< 3 CJK 字符）→ LIKE fallback
         if is_cjk and _count_cjk_chars(query) < 3:
-            return await _search_external_like(query, limit, seen, user_id)
+            return await _search_external_like(query, limit, user_id)
 
         fts_table = "external_items_fts_trigram" if is_cjk else "external_items_fts"
         params: dict[str, Any] = {"q": safe_query, "lim": limit}
@@ -161,6 +194,14 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
         if user_id:
             user_filter = "AND ei.user_id = :uid AND (ds.status = 'active' OR ds.id IS NULL)"
             params["uid"] = user_id
+
+        time_filter = ""
+        if time_start:
+            time_filter += " AND ei.indexed_at >= :time_start"
+            params["time_start"] = time_start
+        if time_end:
+            time_filter += " AND ei.indexed_at < :time_end"
+            params["time_end"] = time_end
 
         async with get_async_session_maker()() as db:
             rows = (
@@ -176,6 +217,7 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
                         WHERE {fts_table} MATCH :q
                           AND ei.deleted_at IS NULL
                           {user_filter}
+                          {time_filter}
                         ORDER BY ei.indexed_at DESC
                         LIMIT :lim
                     """),
@@ -185,9 +227,6 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
 
             for row in rows:
                 eid = f"ext:{row[0]}"
-                if eid in seen:
-                    continue
-                seen.add(eid)
                 indexed_at = row[6]
                 updated_at = row[7]
                 source_name = row[8] or row[2] or "未知来源"
@@ -218,7 +257,13 @@ def _count_cjk_chars(query: str) -> int:
     return sum(1 for ch in query if _CJK_RE.match(ch))
 
 
-async def _search_external_like(query: str, limit: int, seen: set[str], user_id: str | None = None) -> list[MemoryItem]:
+async def _search_external_like(
+    query: str,
+    limit: int,
+    user_id: str | None = None,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
+) -> list[MemoryItem]:
     """LIKE fallback — CJK 短查询（1-2 字）时 trigram 无法命中。"""
     results: list[MemoryItem] = []
     # 安全转义 LIKE 通配符（用 ! 作为 ESCAPE 字符，避免反斜杠跨层转义问题）
@@ -229,6 +274,14 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
     if user_id:
         user_filter = "AND ei.user_id = :uid AND (ds.status = 'active' OR ds.id IS NULL)"
         params["uid"] = user_id
+
+    time_filter = ""
+    if time_start:
+        time_filter += " AND ei.indexed_at >= :time_start"
+        params["time_start"] = time_start
+    if time_end:
+        time_filter += " AND ei.indexed_at < :time_end"
+        params["time_end"] = time_end
 
     try:
         async with get_async_session_maker()() as db:
@@ -244,6 +297,7 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
                         WHERE ei.content LIKE :q ESCAPE '!'
                           AND ei.deleted_at IS NULL
                           {user_filter}
+                          {time_filter}
                         ORDER BY ei.indexed_at DESC
                         LIMIT :lim
                     """),
@@ -253,9 +307,6 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
 
             for row in rows:
                 eid = f"ext:{row[0]}"
-                if eid in seen:
-                    continue
-                seen.add(eid)
                 indexed_at = row[6]
                 updated_at = row[7]
                 source_name = row[8] or row[2] or "未知来源"
@@ -280,8 +331,23 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
     return results
 
 
-async def _search_provider(query: str, limit: int) -> list[MemoryItem]:
-    """DocumentIndexProvider 语义搜索（LanceDB/HRR/Cognee）。
+def _parse_iso_datetime(dt_str: str | None) -> datetime | None:
+    """解析 ISO 格式日期时间字符串为 datetime 对象。"""
+    if not dt_str:
+        return None
+    try:
+        return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+async def _search_provider(
+    query: str,
+    limit: int,
+    time_start: datetime | None = None,
+    time_end: datetime | None = None,
+) -> list[MemoryItem]:
+    """DocumentIndexProvider 语义搜索（LanceDB）。
 
     返回的 item.id 格式：
       - narrative 事件: 裸 event UUID（与 _search_fts5 一致，自然去重）
@@ -300,6 +366,16 @@ async def _search_provider(query: str, limit: int) -> list[MemoryItem]:
         for hit in hits:
             if len(results) >= limit:
                 break
+
+            # 时间过滤：解析 metadata 中的 created_at
+            if time_start or time_end:
+                metadata = hit.metadata if hasattr(hit, "metadata") else {}
+                hit_dt = _parse_iso_datetime(metadata.get("created_at") if isinstance(metadata, dict) else None)
+                if hit_dt:
+                    if time_start and hit_dt < time_start:
+                        continue
+                    if time_end and hit_dt >= time_end:
+                        continue
 
             # narrative 事件: doc_id = "narrative:{event_uuid}" → 裸 UUID
             if hit.doc_id.startswith("narrative:"):

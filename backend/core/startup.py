@@ -1,7 +1,4 @@
-"""应用生命周期 — 启动/关闭编排。
-
-Cognee 初始化已移入 CogneeProvider.initialize()，仅在 CogneeProvider 被选中时运行。
-"""
+"""应用生命周期 — 启动/关闭编排。"""
 
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ from backend.core.config import USER_DATA_DIR, apply_user_config, get_settings
 from backend.core.db import Base, get_async_session_maker, get_engine, init_db
 from backend.core.logging import get_logger, setup_logging
 from backend.core.migrations import migrate_sqlite
-from backend.modules.data_sources.ingestion import get_pipeline, init_pipeline
+from backend.modules.data_sources.ingestion import get_pipeline, init_pipeline_async
 from backend.modules.data_sources.models import DataSource
 from backend.modules.data_sources.registry import create_connector
 
@@ -54,7 +51,7 @@ async def _bootstrap_ingestion() -> None:
         await asyncio.sleep(2)
         store_dir = USER_DATA_DIR
         store_dir.mkdir(exist_ok=True)
-        pipeline = init_pipeline(store_dir)
+        pipeline = await init_pipeline_async(store_dir)
         await pipeline.start()
 
         async with get_async_session_maker()() as db:
@@ -90,6 +87,14 @@ async def _shutdown(
 
     cancel_background_tasks()
 
+    # Provider shutdown
+    with contextlib.suppress(Exception):
+        from backend.modules.data_sources.ingestion import get_document_index_provider
+
+        provider = get_document_index_provider()
+        if provider is not None:
+            await provider.shutdown()
+
     with contextlib.suppress(AssertionError):
         get_pipeline().stop_watching_all()
 
@@ -116,6 +121,12 @@ async def lifespan(app: FastAPI):
     ingestion_task: asyncio.Task | None = asyncio.create_task(
         _bootstrap_ingestion(), name="external-ingestion-bootstrap"
     )
+
+    # 启动语义索引补偿循环（独立于对话流，修复进程崩溃或 LanceDB 恢复后的未同步事件）
+    with contextlib.suppress(Exception):
+        from backend.modules.memory.projection import ProjectionManager
+
+        ProjectionManager.start_provider_compensation_loop()
 
     yield
 

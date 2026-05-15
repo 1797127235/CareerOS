@@ -1,10 +1,10 @@
 """事件分类器 — 双管线路由的单一真相源。
 
 Profile 管线：描述用户「是谁」— 身份、技能、目标、偏好、状态
-             → .md 投影 + L0 固定注入，不进 FTS5/Cognee
+             → .md 投影 + L0 固定注入，不进 FTS5/Provider
 
 Narrative 管线：描述用户「经历了什么」— 经历、决策、上传
-               → FTS5/Cognee 索引 + L2 按需召回，也记录在 .md 展示区
+                → FTS5/Provider 索引 + L2 按需召回，也记录在 .md 展示区
 """
 
 from __future__ import annotations

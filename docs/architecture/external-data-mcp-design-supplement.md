@@ -2,7 +2,9 @@
 
 > 补充文档：针对 `external-data-mcp-design.md` 中缺失的安全、错误处理、可观测性、文件监听与搜索集成维度的详细设计。
 >
-> 状态：DRAFT | 生成于 CEO Review | 适用 Phase 2a/2b/2c
+> 状态：**DRAFT + 架构漂移** | 生成于 CEO Review | 适用 Phase 2a/2b/2c
+>
+> **重要：当前代码已偏离本设计。** 实际落地时未采用 MCP Server 方案，且语义索引后端由 Cognee 改为 `LanceDBProvider`（`DocumentIndexProvider` 接口）。以下文档保留原始设计供参考，但涉及 Cognee/MCP 的部分请对照 `ingestion-refactor-design.md` 的"实现状态"章节。
 
 ---
 
@@ -246,10 +248,10 @@ async def safe_index_document(doc_id: str, content: str, db: AsyncSession):
     return False
 ```
 
-**Cognee 索引写入**：
-- Cognee 失败 **不阻塞** 主流程
-- 记录失败文件，后台重试队列
-- 如果 Cognee 持续失败，自动降级到 FTS5（Phase 2c）
+**DocumentIndexProvider（语义索引）写入**：
+- Provider 失败 **不阻塞** 主流程
+- 记录失败文件，后台重试队列（`memory_worker` 重试 3 次）
+- 如果 LanceDB 持续失败，自动降级到 FTS5（FTS5 触发器始终与 DB 同步）
 
 ---
 
@@ -367,7 +369,7 @@ CREATE TABLE external_index_status (
 | 搜索结果为空 | 检查 `external_data.search.queried` 日志，确认 query 和 scope |
 | 索引卡住 | 检查 `external_data.scan_completed` 是否到达，对比 `indexed_files`/`total_files` |
 | MCP 不可用 | 检查 `external_data.mcp_timeout` 频率，确认 MCP Server 进程 |
-| Cognee 失败 | 检查 `CogneeProvider` 或 `cognify_loop.py` 的 error 日志 |
+| Provider 失败 | 检查 `LanceDBProvider` 或 `document_index_provider.py` 的 error 日志 |
 
 **调试端点**（仅 DEBUG 模式）：
 ```
@@ -555,7 +557,7 @@ class MemoryItem:
     - [external:filesystem] Cargo.toml 配置说明（来自 Obsidian）
 ```
 
-**Phase 2c（FTS5 + Cognee 混合搜索）**：
+**Phase 2c（FTS5 + DocumentIndexProvider 语义搜索）**（设计预留，当前由 LanceDBProvider 实现）：
 
 ```
 用户查询: "设计模式"
@@ -563,14 +565,14 @@ class MemoryItem:
 [Parallel Query]
     ├── FTS5(internal) → [...]
     ├── FTS5(external) → [...]
-    └── Cognee(semantic) → [...]
+    └── DocumentIndexProvider(semantic) → [...]
     ↓
 [Merge & Deduplicate]
-    - Cognee 结果可能包含 FTS5 已返回的文件
-    - 去重：优先保留 Cognee 结果（语义更准），标记为 `semantic`
+    - Provider 结果可能包含 FTS5 已返回的文件
+    - 去重：优先保留 Provider 结果（语义更准），标记为 `semantic`
     ↓
 [返回]
-    - [semantic] 设计模式笔记.md（Cognee 语义匹配）
+    - [semantic] 设计模式笔记.md（LanceDB 语义匹配）
     - [external:filesystem] 代码实现.py（FTS5 关键词匹配）
     - [internal] 用户讨论过工厂模式（FTS5 内部记忆）
 ```
@@ -744,7 +746,7 @@ EXTERNAL_DATA_DEBUG_ENDPOINTS=true
 | 风险 | 可能性 | 影响 | 缓解 |
 |------|--------|------|------|
 | MCP Server 生态不成熟 | 中 | 中 | 同时保留本地 fallback 实现 |
-| Cognee 稳定性问题 | 中 | 高 | FTS5 作为永久兜底，Cognee 可选开启 |
+| LanceDB 稳定性问题 | 中 | 高 | FTS5 作为永久兜底，LanceDB 可选开启 |
 | 大量文件索引性能差 | 高 | 中 | 批量索引 + debounce + 异步后台 |
 | 用户配置路径包含敏感数据 | 高 | 高 | 默认排除列表 + 路径白名单 |
 | 文件监听跨平台差异 | 中 | 低 | watchdog 库封装，各平台测试 |

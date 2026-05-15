@@ -15,6 +15,7 @@ from backend.core.logging import get_logger
 from backend.modules.data_sources.ingestion.connector import DataSourceConnector, RawBytes, StructuredDocument
 from backend.modules.data_sources.ingestion.document_index_provider import DocumentIndexProvider
 from backend.modules.data_sources.ingestion.parser import parse_raw_bytes
+from backend.modules.data_sources.ingestion.providers.null import NullProvider
 from backend.modules.data_sources.ingestion.retry import jittered_sleep
 from backend.modules.data_sources.ingestion.store import IngestionStore
 
@@ -29,7 +30,7 @@ class IngestionPipeline:
     """协调多个 DataSourceConnector，将文档写入 external_items。
 
     Phase 3 改造：
-      - 注入 DocumentIndexProvider，移除硬编码 Cognee
+      - 注入 DocumentIndexProvider，可插拔语义搜索
       - 批量写入（batch_size=100 或 flush_interval=5s）
       - 背压控制（memory_queue maxsize=1000）
       - 异步记忆索引队列
@@ -364,11 +365,33 @@ def init_pipeline(
     store_dir: Path,
     document_index_provider: DocumentIndexProvider | None = None,
 ) -> IngestionPipeline:
+    """创建 IngestionPipeline 实例（同步）。
+
+    如果未传入 document_index_provider，使用 NullProvider 作为占位，
+    需要异步初始化 Provider 时请使用 init_pipeline_async()。
+    """
+    global _pipeline
+
+    if document_index_provider is None:
+        document_index_provider = NullProvider()
+
+    _pipeline = IngestionPipeline(
+        store_dir / "ingestion_state.json",
+        document_index_provider=document_index_provider,
+    )
+    return _pipeline
+
+
+async def init_pipeline_async(
+    store_dir: Path,
+    document_index_provider: DocumentIndexProvider | None = None,
+) -> IngestionPipeline:
+    """异步创建 IngestionPipeline — 通过 provider_factory 初始化 Provider。"""
     global _pipeline
     from backend.modules.data_sources.ingestion.provider_factory import create_document_index_provider
 
     if document_index_provider is None:
-        document_index_provider = create_document_index_provider()
+        document_index_provider = await create_document_index_provider()
 
     _pipeline = IngestionPipeline(
         store_dir / "ingestion_state.json",

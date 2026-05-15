@@ -5,7 +5,7 @@
 
 双管线架构：
 - Profile 事件 → .md 投影 + L0 固定注入（不进搜索索引）
-- Narrative 事件 → FTS5 索引 + L2 按需召回（Cognee 保留供 Phase 2 外部数据）
+- Narrative 事件 → FTS5 索引 + L2 按需召回（Provider 语义搜索）
 """
 
 from __future__ import annotations

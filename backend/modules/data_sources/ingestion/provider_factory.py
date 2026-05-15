@@ -1,7 +1,8 @@
-"""DocumentIndexProvider 工厂 — 根据配置创建 Provider 实例。"""
+"""DocumentIndexProvider 工厂 — 根据用户配置创建 Provider 实例。"""
 
 from __future__ import annotations
 
+from backend.core.config import load_user_config
 from backend.core.logging import get_logger
 from backend.modules.data_sources.ingestion.document_index_provider import DocumentIndexProvider
 from backend.modules.data_sources.ingestion.providers.null import NullProvider
@@ -12,45 +13,39 @@ _PROVIDER_REGISTRY: dict[str, type[DocumentIndexProvider]] = {}
 
 
 def _register_providers() -> None:
-    """注册内置 Provider（类级别，无需实例化）。"""
-    from backend.modules.data_sources.ingestion.providers.cognee import CogneeProvider
-    from backend.modules.data_sources.ingestion.providers.hrr import HRRProvider
+    """注册内置 Provider（仅 LanceDB + Null）。"""
     from backend.modules.data_sources.ingestion.providers.lancedb import LanceDBProvider
 
-    _PROVIDER_REGISTRY[CogneeProvider.provider_name()] = CogneeProvider
-    _PROVIDER_REGISTRY[LanceDBProvider.provider_name()] = LanceDBProvider
-    _PROVIDER_REGISTRY[HRRProvider.provider_name()] = HRRProvider
-    _PROVIDER_REGISTRY[NullProvider.provider_name()] = NullProvider
+    _PROVIDER_REGISTRY["lancedb"] = LanceDBProvider
+    _PROVIDER_REGISTRY["null"] = NullProvider
 
 
-def create_document_index_provider(config: dict | None = None) -> DocumentIndexProvider:
-    """根据配置创建 DocumentIndexProvider 实例。
+async def create_document_index_provider(config: dict | None = None) -> DocumentIndexProvider:
+    """根据用户配置创建 DocumentIndexProvider 实例。
 
-    优先级：
-      1. config["document_index_provider"] 显式指定
-      2. 检测可用后端（Cognee → Null）
+    从 config.json 读取 document_index_provider 字段决定创建哪种 Provider。
+    降级逻辑：无效值 / LanceDB 依赖不可用 → NullProvider。
     """
     if not _PROVIDER_REGISTRY:
         _register_providers()
 
-    backend = (config or {}).get("document_index_provider", "auto")
+    user_config = config or load_user_config()
+    backend = user_config.get("document_index_provider", "lancedb")
 
-    if backend == "auto":
-        # 自动检测：优先 Cognee → LanceDB → HRR → Null
-        for name in ("cognee", "lancedb", "hrr", "null"):
-            cls = _PROVIDER_REGISTRY.get(name)
-            if cls and cls.is_available():
-                backend = name
-                break
-        else:
-            backend = "null"
+    if backend == "disabled":
+        backend = "null"
 
     provider_cls = _PROVIDER_REGISTRY.get(backend)
     if not provider_cls:
-        logger.warning(f"Unknown provider {backend}, falling back to null")
-        provider_cls = _PROVIDER_REGISTRY.get("null", NullProvider)
+        logger.warning(f"Unknown provider '{backend}', falling back to null")
+        provider_cls = NullProvider
+
+    # LanceDB 依赖不可用时降级
+    if backend == "lancedb" and not provider_cls.is_available():
+        logger.warning("LanceDB dependencies not available, falling back to null")
+        provider_cls = NullProvider
 
     provider = provider_cls()
-    provider.initialize()
+    await provider.initialize()
     logger.info("document_index_provider.initialized", provider=provider.name)
     return provider

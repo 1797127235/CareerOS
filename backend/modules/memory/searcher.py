@@ -10,7 +10,7 @@ from backend.core.logging import get_logger
 from backend.modules.memory.classifier import NARRATIVE_EVENT_TYPES
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.memory.search import MemoryItem, search_all
-from backend.modules.memory.snapshot import build_snapshot, get_context_conv_ids
+from backend.modules.memory.snapshot import build_snapshot
 
 logger = get_logger(__name__)
 
@@ -186,14 +186,16 @@ class MemorySearcher:
           - "today" | "yesterday" | "recent_3d" | "recent_7d" | "recent_30d"
           - "YYYY-MM-DD~YYYY-MM-DD" 绝对范围
         """
+        time_start, time_end = _parse_time_filter(time_filter)
         if search_mode == "grep":
-            time_start, time_end = _parse_time_filter(time_filter)
             return await self.list_events_by_time_range(user_id, time_start, time_end, limit=limit)
 
         return await search_all(
             user_id,
             query,
             limit=limit,
+            time_start=time_start,
+            time_end=time_end,
         )
 
     async def build_context(
@@ -206,14 +208,13 @@ class MemorySearcher:
         """构建 system prompt 记忆上下文。
 
         1. 分层注入快照（build_snapshot）— L0 Profile 固定块 + L1 近期对话，5 分钟 TTL
-        2. 如果提供 user_input，L2 语义召回（FTS5 + Cognee，覆盖 narrative + external）
+        2. 如果提供 user_input，L2 语义召回（FTS5 + Provider，覆盖 narrative + external）
 
         双管线：L0（Profile 事件聚合）和 L2（多源搜索）数据源不同，
-        物理上不可能重复注入。
+        物理上不可能重复注入。L1（近期对话）与 L2（语义召回）数据源亦物理隔离，
+        无需去重。
         """
         static_ctx = await build_snapshot(user_id)
-
-        recent_ids = await get_context_conv_ids(user_id)
 
         dynamic_parts: list[str] = []
         if user_input:
@@ -226,9 +227,6 @@ class MemorySearcher:
                 if items:
                     lines = ["【相关记忆】"]
                     for item in items:
-                        # recent_ids 为 None 表示缓存过期/未知，不做去重（保守策略）
-                        if recent_ids is not None and item.id in recent_ids:
-                            continue
                         lines.append(f"- {item.content[:300]}")
                     if len(lines) > 1:
                         dynamic_parts.append("\n".join(lines))

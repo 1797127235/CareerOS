@@ -104,10 +104,6 @@ class Settings(BaseSettings):
     # ── 数据库 ──
     database_url: str = ""
 
-    # ── Cognee ──
-    # 单实例 / 自托管默认共用一个数据集；多用户同机部署时请为每用户拆分策略另行设计
-    cognee_dataset: str = "lumen"
-
     # ── Agent 工作目录 ──
     # Agent 文件工具可访问的根目录（用于开发时访问项目文件）
     # 默认使用用户主目录（最安全），可配置为项目根目录以方便开发
@@ -206,6 +202,7 @@ def apply_user_config(settings: Settings, user_config: dict[str, Any] | None = N
         "embedding_model",
         "embedding_api_key",
         "embedding_base_url",
+        "document_index_provider",
     )
 
     for key in _CONFIG_KEYS:

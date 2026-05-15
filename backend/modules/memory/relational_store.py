@@ -139,7 +139,7 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         return list(result.scalars().all())
 
     async def get_needing_projection(
-        self, user_id: str, projection_field: str = "projected_cognee_at", limit: int = 50
+        self, user_id: str, projection_field: str = "projected_provider_at", limit: int = 50
     ) -> list[GrowthEvent]:
         from sqlalchemy import null
 

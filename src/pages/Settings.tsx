@@ -119,6 +119,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [dsLoading, setDsLoading] = useState(false);
   const [addingFolder, setAddingFolder] = useState(false);
 
+  const [docIndexProvider, setDocIndexProvider] = useState("lancedb");
+  const [docIndexProviderStatus, setDocIndexProviderStatus] = useState("ready");
+
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const savedTimer = useRef<number | null>(null);
@@ -141,6 +144,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         setEmbeddingProvider(cfg.embedding_provider || "dashscope");
         setEmbeddingModel(cfg.embedding_model || "text-embedding-v4");
         setEmbeddingBaseUrl(cfg.embedding_base_url || "");
+        setDocIndexProvider(cfg.document_index_provider || "lancedb");
+        setDocIndexProviderStatus(cfg.document_index_provider_status || "ready");
         if (providers) setProviderCatalog(providers);
         setMemStats(mem);
       })
@@ -194,6 +199,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         embedding_provider: embeddingProvider,
         embedding_model: embeddingModel,
         embedding_base_url: embeddingBaseUrl,
+        document_index_provider: docIndexProvider,
       };
       if (llmApiKey) data.llm_api_key = llmApiKey.trim();
       if (embeddingApiKey) data.embedding_api_key = embeddingApiKey.trim();
@@ -586,6 +592,51 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                       {memResetMsg}
                     </p>
                   )}
+                </section>
+
+                {/* 语义搜索 Provider 选择 */}
+                <section className="p-lg rounded-xl border border-border bg-surface">
+                  <div className="flex items-center justify-between mb-md">
+                    <span className="text-sm font-medium text-ink">语义搜索</span>
+                  </div>
+
+                  <div className="space-y-md">
+                    <div className="grid grid-cols-2 gap-sm">
+                      <div>
+                        <label className="block text-xs text-text-subtle mb-xs">Provider</label>
+                        <select
+                          value={docIndexProvider}
+                          onChange={(e) => setDocIndexProvider(e.target.value)}
+                          className="w-full px-sm py-2 border border-border rounded-lg text-sm bg-surface-elevated outline-none focus:border-ink transition-colors"
+                        >
+                          <option value="lancedb">LanceDB（向量搜索）</option>
+                          <option value="disabled">关闭（仅关键词搜索）</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-text-subtle mb-xs">状态</label>
+                        <div className="flex items-center gap-xs px-sm py-2">
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              docIndexProviderStatus === "ready" ? "bg-success" : "bg-danger"
+                            }`}
+                          />
+                          <span className="text-sm text-text">
+                            {docIndexProviderStatus === "ready"
+                              ? "就绪"
+                              : docIndexProviderStatus === "error"
+                              ? "错误"
+                              : docIndexProviderStatus === "not_initialized"
+                              ? "未初始化"
+                              : docIndexProviderStatus}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-text-subtle">
+                      切换后需重启应用生效
+                    </p>
+                  </div>
                 </section>
               </div>
             )}

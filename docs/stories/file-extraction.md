@@ -1,5 +1,11 @@
 # Story: 文件内容智能提取（Mode 2）
 
+> **状态：未实现 + 架构漂移**
+>
+> 本 Story 描述的功能（上传文件后 Agent 自动提取内容写入记忆）**尚未在代码中实现**。
+>
+> 本 Story 设计时假设的 `Cognee` 索引和 `SemanticStore` 等组件**已移除**。当前语义搜索由 `LanceDBProvider`（`DocumentIndexProvider` 接口）实现。若未来实施文件上传功能，应基于现有 `IngestionPipeline` + `DocumentIndexProvider` 架构。
+
 ## 背景
 
 文件上传功能已实现（parse → chunk → Cognee 索引 + document_uploaded 事件）。但 Agent 不会在上传时主动学习文件内容——用户得问了才检索。

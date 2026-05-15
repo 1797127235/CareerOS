@@ -82,7 +82,7 @@ async def get_my_memory(user_id: str = Query("demo_user")) -> MemoryContent:
 async def get_memory_stats(user_id: str = Query("demo_user")) -> MemoryStats:
     _validate_user_id(user_id)
     memory = _get_memory()
-    status = memory.cognee_status()
+    status = "ready"
     try:
         count = await memory.count_events(user_id)
     except Exception as exc:
@@ -121,12 +121,9 @@ async def rebuild_memory(user_id: str = Query("demo_user")) -> dict:
     try:
         result = await _get_memory().rebuild(user_id)
         md_ok = result.get("md_success", False)
-        cognee_ok = result.get("cognee_success")
         msg = "重建成功"
         if not md_ok:
             msg = ".md 重建失败"
-        elif cognee_ok is False:
-            msg = ".md 已重建，但 Cognee 重建失败"
         return {"message": msg, "user_id": user_id, **result}
     except HTTPException:
         raise

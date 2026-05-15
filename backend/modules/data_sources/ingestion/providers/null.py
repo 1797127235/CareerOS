@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.modules.data_sources.ingestion.document_index_provider import DocumentIndexProvider, ProviderHit
+from backend.modules.data_sources.ingestion.document_index_provider import (
+    DocumentIndexProvider,
+    HealthStatus,
+    ProviderHit,
+)
 
 
 class NullProvider(DocumentIndexProvider):
@@ -18,7 +22,7 @@ class NullProvider(DocumentIndexProvider):
     def is_available(cls) -> bool:
         return True
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         pass
 
     async def prefetch(self, query: str) -> list[ProviderHit]:
@@ -40,3 +44,12 @@ class NullProvider(DocumentIndexProvider):
 
     def get_tool_schemas(self) -> list[dict]:
         return []
+
+    def health_check(self) -> HealthStatus:
+        return HealthStatus.READY
+
+    async def on_session_end(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
+        pass

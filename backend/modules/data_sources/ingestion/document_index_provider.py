@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
+
+
+class HealthStatus(StrEnum):
+    """Provider 健康状态。"""
+
+    READY = "ready"
+    DEGRADED = "degraded"
+    ERROR = "error"
+    NOT_INITIALIZED = "not_initialized"
 
 
 @dataclass
@@ -32,7 +42,7 @@ class DocumentIndexProvider(ABC):
     """记忆提供者抽象基类。所有具体后端必须继承此类。
 
     接口极简：主循环只调 prefetch() 和 sync_document()，
-    完全不知道背后是 Cognee、LanceDB 还是 HRR。
+    完全不知道背后是 LanceDB 还是其他实现。
     分块策略由 Provider 内部决定，外部不感知。
     """
 
@@ -49,11 +59,11 @@ class DocumentIndexProvider(ABC):
     @classmethod
     @abstractmethod
     def is_available(cls) -> bool:
-        """检查依赖是否已安装（如 cognee、lancedb）。类级别，无需实例化。"""
+        """检查依赖是否已安装（如 lancedb）。类级别，无需实例化。"""
 
     @abstractmethod
-    def initialize(self) -> None:
-        """初始化后端（建表、建索引等）。"""
+    async def initialize(self) -> None:
+        """异步初始化后端（建表、建索引、加载模型等）。"""
 
     @abstractmethod
     async def prefetch(self, query: str) -> list[ProviderHit]:
@@ -87,3 +97,15 @@ class DocumentIndexProvider(ABC):
     async def handle_tool_call(self, name: str, args: dict) -> str:
         """处理 Agent 的工具调用。默认抛异常。"""
         raise NotImplementedError(f"Tool {name} not supported by {self.name}")
+
+    def health_check(self) -> HealthStatus:
+        """返回当前健康状态。默认 READY。"""
+        return HealthStatus.READY
+
+    async def on_session_end(self) -> None:  # noqa: B027
+        """对话结束时调用。默认空操作。"""
+        pass
+
+    async def shutdown(self) -> None:  # noqa: B027
+        """应用关闭时调用。默认空操作。"""
+        pass

@@ -18,7 +18,7 @@ class GrowthEvent(Base):
         Index("ix_growth_events_user_entity", "user_id", "entity_type", "entity_id"),
         Index("ix_growth_events_dedupe", "user_id", "dedupe_key"),
         Index("ix_growth_events_unprojected_md", "user_id", "projected_md_at"),
-        Index("ix_growth_events_unprojected_cognee", "user_id", "projected_cognee_at"),
+        Index("ix_growth_events_unprojected_provider", "user_id", "projected_provider_at"),
         UniqueConstraint("user_id", "dedupe_key", name="uq_growth_events_user_dedupe"),
     )
 
@@ -33,7 +33,7 @@ class GrowthEvent(Base):
     dedupe_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     projected_md_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    projected_cognee_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    projected_provider_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<GrowthEvent {self.event_type} user={self.user_id} at {self.created_at}>"
