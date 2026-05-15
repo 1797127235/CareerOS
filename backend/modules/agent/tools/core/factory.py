@@ -150,14 +150,14 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
             name="memory_save",
             description=(
                 "保存记忆。主动调用！不要等用户要求！"
-                "entity_type: skills / experiences / preferences / goals / decisions / status"
+                "entity_type: skills / experiences / preferences / goals / decisions / status / note"
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "entity_type": {
                         "type": "string",
-                        "description": "类型 — skills / experiences / preferences / goals / decisions / status",
+                        "description": "类型 — skills / experiences / preferences / goals / decisions / status / note",
                     },
                     "section": {"type": "string", "description": "标题/名称"},
                     "content": {"type": "string", "description": "具体内容"},

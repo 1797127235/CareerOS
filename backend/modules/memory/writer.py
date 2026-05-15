@@ -6,12 +6,8 @@ from typing import TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.db import get_async_session_maker
-from backend.core.logging import get_logger
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.memory.relational_store import GrowthEventRepository
-
-logger = get_logger(__name__)
 
 
 class EventSpec(TypedDict, total=False):
@@ -23,7 +19,11 @@ class EventSpec(TypedDict, total=False):
 
 
 class MemoryWriter:
-    """事件写入职责 — 被 LumenMemory 组合。"""
+    """事件写入职责 — 纯写入，无 session 管理，无投影触发。
+
+    db 必须显式传入。commit 和投影同步由 LumenMemory 编排。
+    可独立实例化测试写入逻辑。
+    """
 
     async def _write_events(
         self,
@@ -59,13 +59,9 @@ class MemoryWriter:
         payload: dict | None = None,
         source: str = "system",
         *,
-        db: AsyncSession | None = None,
+        db: AsyncSession,
     ) -> GrowthEvent | None:
-        """写入一条记忆事件。
-
-        db=None:  自开 session，commit + 同步 .md + async Cognee。
-        db=外部:  flush only。调用方 commit 后调 sync_projections()。
-        """
+        """写入一条记忆事件（db 必须传入，仅 flush）。"""
         spec: EventSpec = {
             "event_type": event_type,
             "entity_type": entity_type,
@@ -73,38 +69,16 @@ class MemoryWriter:
             "payload": payload,
             "source": source,
         }
-
-        if db is not None:
-            created = await self._write_events(user_id, [spec], db)
-            return created[0] if created else None
-
-        async with get_async_session_maker()() as session:
-            created = await self._write_events(user_id, [spec], session)
-            if created:
-                await session.commit()
-                await self.flush_projections(user_id, [str(created[0].id)])  # type: ignore[attr-defined]
-            return created[0] if created else None
+        created = await self._write_events(user_id, [spec], db)
+        return created[0] if created else None
 
     async def remember_batch(
         self,
         user_id: str,
         events: list[EventSpec],
         *,
-        db: AsyncSession | None = None,
+        db: AsyncSession,
     ) -> list[GrowthEvent]:
-        """批量写入，单事务。
-
-        db=None: 自开 session，一次 commit + 同步全部投影。
-        db=外部: flush only。调用方 commit 后调 sync_projections()。
-        """
+        """批量写入（db 必须传入，仅 flush）。"""
         specs: list[dict] = [dict(e) for e in events]
-
-        if db is not None:
-            return await self._write_events(user_id, specs, db)
-
-        async with get_async_session_maker()() as session:
-            created = await self._write_events(user_id, specs, session)
-            if created:
-                await session.commit()
-                await self.flush_projections(user_id, [str(e.id) for e in created])  # type: ignore[attr-defined]
-            return created
+        return await self._write_events(user_id, specs, db)

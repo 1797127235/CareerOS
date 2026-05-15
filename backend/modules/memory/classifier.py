@@ -9,7 +9,10 @@ Narrative 管线：描述用户「经历了什么」— 经历、决策、上传
 
 from __future__ import annotations
 
+import logging
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 # ── Profile 事件：用户画像/状态，永远注入 L0，不需要搜索 ──
 PROFILE_EVENT_TYPES: frozenset[str] = frozenset(
@@ -28,6 +31,7 @@ NARRATIVE_EVENT_TYPES: frozenset[str] = frozenset(
     {
         "experience_added",
         "decision_made",
+        "note_added",  # 通用叙事：对话洞察、反思、笔记等
     }
 )
 
@@ -48,19 +52,14 @@ PipelineName = Literal["profile", "narrative"]
 def classify(event_type: str) -> PipelineName:
     """返回事件类型所属管线。
 
-    Raises:
-        ValueError: 未知事件类型
+    未知类型默认归入 narrative（可搜索），并记录警告以便后续补充。
     """
     if event_type in PROFILE_EVENT_TYPES:
         return "profile"
     if event_type in NARRATIVE_EVENT_TYPES:
         return "narrative"
-    raise ValueError(f"Unknown event_type: {event_type!r}")
-
-
-def is_indexable(event_type: str) -> bool:
-    """该事件类型是否应被索引到 FTS5/Cognee（用于 L2 搜索召回）。"""
-    return event_type in NARRATIVE_EVENT_TYPES
+    logger.warning("Unknown event_type %r, defaulting to narrative", event_type)
+    return "narrative"
 
 
 def is_l0_fixed(event_type: str) -> bool:
@@ -79,7 +78,6 @@ __all__ = [
     "PROFILE_EVENT_TYPES",
     "PipelineName",
     "classify",
-    "is_indexable",
     "is_l0_fixed",
     "is_profile",
 ]

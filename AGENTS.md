@@ -31,91 +31,99 @@ cargo tauri dev
 career-os/
 ├── backend/                    # FastAPI 后端
 │   ├── main.py                 # FastAPI 入口，lifespan 中自动建表 + 初始化
-│   ├── config.py               # pydantic-settings，从根目录 .env 加载
-│   ├── db.py                   # SQLAlchemy AsyncEngine + Base + get_async_session_maker
-│   ├── db_migrations.py        # SQLite 兼容迁移、FTS5 表、触发器
-│   ├── logging_config.py       # 结构化日志配置
-│   ├── agent/
-│   │   ├── pydantic_agent.py   # PydanticAI Agent 定义 + 动态系统提示词
-│   │   ├── event_handlers.py   # Agent 事件处理（流式输出、工具调用跟踪）
-│   │   ├── deps.py             # Agent 依赖注入（LumenDeps）
-│   │   └── tools/
-│   │       ├── file_security.py          # 文件安全（路径校验、大小限制、二进制检测）
-│   │       ├── builtin/                  # 内置工具 Handler
-│   │       │   ├── memory.py             # memory_search, memory_save
-│   │       │   ├── profile.py            # get_profile, update_profile
-│   │       │   ├── files.py              # 文件读写工具
-│   │       │   └── external.py           # search_external_docs（外部数据搜索）
-│   │       ├── core/                     # 工具运行时核心
-│   │       │   ├── registry.py           # ToolRegistry（工具注册表）
-│   │       │   ├── dispatcher.py         # ToolDispatcher（调用分发）
-│   │       │   ├── definitions.py        # ToolDefinition（工具元数据）
-│   │       │   ├── factory.py            # ToolRuntime 工厂 + Toolset 注册
-│   │       │   ├── context.py            # ToolRuntimeContext（运行时上下文）
-│   │       │   ├── policies.py           # 安全策略（路径、预算、循环守卫、审批）
-│   │       │   └── toolsets.py           # Toolset 定义与解析
-│   │       ├── adapters/
-│   │       │   └── pydanticai.py         # PydanticAI 工具适配器
-│   │       └── mcp/
-│   │           └── __init__.py           # MCP 预留
-│   ├── api/
-│   │   ├── chat/
-│   │   │   ├── routes.py       # POST /api/chat (SSE), GET /api/chat/history, ...
-│   │   │   └── lock.py         # 对话并发锁
-│   │   └── routers/
-│   │       ├── health.py       # GET /api/health
-│   │       ├── memory.py       # 记忆管理路由（stats/list/reset/rebuild/search/...）
-│   │       ├── config.py       # GET/POST /api/config, /api/config/providers, /api/config/test
-│   │       └── summary.py      # 对话摘要后台任务（无路由，被 chat_service 调用）
-│   ├── application/
-│   │   ├── chat_service.py     # 对话业务：Agent Loop 集成 + SSE 流式输出
-│   │   ├── chat_session.py     # 会话状态管理
-│   │   ├── chat_persistence.py # 消息持久化
-│   │   ├── profile_service.py  # 画像业务
-│   │   ├── resume_service.py   # 简历解析
-│   │   └── review_service.py   # 后台记忆审查兜底
-│   ├── domain/
-│   │   ├── models/
-│   │   │   ├── user.py         # User + UserProfile（含 profile_data JSON）
-│   │   │   ├── conversation.py # Conversation
-│   │   │   ├── message.py      # Message
-│   │   │   ├── growth_event.py # GrowthEvent 事件溯源
-│   │   │   └── agent_trace.py  # AgentTrace 可观测性
-│   │   └── schemas/
-│   │       ├── profile.py      # ProfileResponse, ProfileUpdate, SkillItem（含 context）
-│   │       └── memory.py       # EventType, ENTITY_TYPE_MAP, EVENT_PAYLOAD_MAP
-│   ├── ingestion/              # 外部数据接入（Phase 2a+）
-│   │   ├── connector.py        # DataSourceConnector ABC + RawDocument
-│   │   ├── pipeline.py         # IngestionPipeline（扫描 → 索引状态机）
-│   │   ├── store.py            # IngestionStore（JSON 原子写入，dedup 状态）
-│   │   ├── retry.py            # jittered_retry 装饰器
-│   │   └── connectors/
-│   │       └── filesystem.py   # FilesystemConnector（.md/.txt 扫描 + watchdog）
-│   ├── memory/                 # 记忆层（双管线：Profile + Narrative）
-│   │   ├── facade.py           # LumenMemory 统一门面
-│   │   ├── search.py           # FTS5 全文搜索（growth_events_fts + external_items_fts）
-│   │   ├── searcher.py         # recall() 统一召回入口
-│   │   ├── projection.py       # growth_events → .md 投影
-│   │   ├── markdown.py         # .md 文件读写
-│   │   ├── writer.py           # 事件写入
-│   │   ├── relational_store.py # SQLite 关系存储
-│   │   ├── cognify_loop.py     # Cognee 后台 cognify 任务
-│   │   ├── classifier.py       # 事件分类
-│   │   ├── understanding.py    # AI 综合画像生成
-│   │   ├── snapshot.py         # 记忆快照
-│   │   ├── events_merger.py    # 事件合并
-│   │   ├── datasets.py         # Cognee dataset 管理
-│   │   ├── projection.py       # growth_events → .md 投影
-│   │   ├── markdown.py         # .md 文件读写
-│   │   ├── writer.py           # 事件写入
-│   │   ├── relational_store.py # SQLite 关系存储
-│   │   ├── search.py           # 全文搜索（FTS5 + Provider）
-│   │   └── searcher.py         # recall() 统一召回入口
-│   └── utils/
-│       ├── date_utils.py       # 日期工具
-│       ├── json_utils.py       # JSON 工具
-│       ├── parsers.py          # 解析工具
-│       └── path_utils.py       # 路径工具
+│   ├── model_registry.py       # SQLAlchemy 模型注册（供 alembic/migration 使用）
+│   ├── core/                   # 基础设施
+│   │   ├── config.py           # pydantic-settings，从根目录 .env 加载
+│   │   ├── db.py               # SQLAlchemy AsyncEngine + Base + get_async_session_maker
+│   │   ├── logging.py          # 结构化日志配置
+│   │   ├── migrations.py       # SQLite 兼容迁移、FTS5 表、触发器
+│   │   └── startup.py          # 启动初始化（建表、Cognee、IngestionPipeline）
+│   ├── shared/                 # 跨模块通用工具
+│   │   ├── date_utils.py       # 日期工具
+│   │   ├── json_utils.py       # JSON 工具
+│   │   ├── parsers.py          # 解析工具
+│   │   └── path_utils.py       # 路径工具
+│   └── modules/                # 业务模块（按领域拆分）
+│       ├── agent/              # Agent 系统
+│       │   ├── pydantic_agent.py   # PydanticAI Agent 定义 + 动态系统提示词
+│       │   ├── event_handlers.py   # Agent 事件处理（流式输出、工具调用跟踪）
+│       │   ├── deps.py             # Agent 依赖注入（LumenDeps）
+│       │   ├── models.py           # AgentTrace 可观测性
+│       │   └── tools/
+│       │       ├── file_security.py     # 文件安全（路径校验、大小限制、二进制检测）
+│       │       ├── builtin/             # 内置工具 Handler
+│       │       │   ├── memory.py        # memory_search, memory_save
+│       │       │   ├── profile.py       # get_profile, update_profile
+│       │       │   ├── files.py         # 文件读写工具
+│       │       │   ├── external.py      # search_external_docs（外部数据搜索）
+│       │       │   └── schemas.py       # 工具输入/输出 Pydantic schema
+│       │       ├── core/                # 工具运行时核心
+│       │       │   ├── registry.py      # ToolRegistry（工具注册表）
+│       │       │   ├── dispatcher.py    # ToolDispatcher（调用分发）
+│       │       │   ├── definitions.py   # ToolDefinition（工具元数据）
+│       │       │   ├── factory.py       # ToolRuntime 工厂 + Toolset 注册
+│       │       │   ├── context.py       # ToolRuntimeContext（运行时上下文）
+│       │       │   ├── policies.py      # 安全策略（路径、预算、循环守卫、审批）
+│       │       │   └── toolsets.py      # Toolset 定义与解析
+│       │       ├── adapters/
+│       │       │   └── pydanticai.py    # PydanticAI 工具适配器
+│       │       └── mcp/                 # MCP 预留
+│       ├── chat/               # 对话模块
+│       │   ├── router.py       # POST /api/chat (SSE), GET /api/chat/history, ...
+│       │   ├── service.py      # 对话业务：Agent Loop 集成 + SSE 流式输出
+│       │   ├── session.py      # 会话状态管理
+│       │   ├── persistence.py  # 消息持久化
+│       │   ├── lock.py         # 对话并发锁
+│       │   ├── summary.py      # 对话摘要后台任务
+│       │   └── models.py       # Conversation + Message
+│       ├── memory/             # 记忆层（双管线：Profile + Narrative）
+│       │   ├── facade.py       # LumenMemory 统一门面（多继承组合）
+│       │   ├── models.py       # GrowthEvent ORM 模型
+│       │   ├── classifier.py   # 事件分类（Profile / Narrative 路由）
+│       │   ├── writer.py       # 事件写入（单条/批量，含去重）
+│       │   ├── searcher.py     # 搜索/召回 + 上下文构建（L0/L1/L2 分层注入）
+│       │   ├── search.py       # 全文搜索（FTS5 + Provider）+ 外部文档搜索
+│       │   ├── relational_store.py  # Repository 模式 + FTS5 触发器管理
+│       │   ├── projection.py   # .md 投影同步、全量重建、删除、重置
+│       │   ├── markdown.py     # .md 文件原子读写 + growth_events → memory.md 投影
+│       │   ├── snapshot.py     # Agent 系统提示词分层快照（L0/L1/L2）
+│       │   ├── events_merger.py  # 事件合并与 memory.md 生成（纯函数层）
+│       │   ├── understanding.py  # AI 综合画像生成（about_you.md，LLM 驱动）
+│       │   ├── cognify_loop.py   # Cognee 初始化 + 后台 cognify 循环
+│       │   ├── datasets.py       # Cognee dataset 常量
+│       │   ├── router.py         # 记忆管理 API 路由（16 个端点）
+│       │   └── review_service.py # 后台记忆审查（Agent fork 审查对话）
+│       ├── profile/            # 画像模块
+│       │   ├── models.py       # User + UserProfile（含 profile_data JSON）
+│       │   ├── schemas.py      # ProfileResponse, ProfileUpdate, SkillPayload 等
+│       │   ├── service.py      # 画像结构化读写业务
+│       │   └── resume_service.py  # 简历解析
+│       ├── config/             # 配置模块
+│       │   ├── router.py       # GET/POST /api/config, /api/config/providers, /api/config/test
+│       │   └── service.py      # 配置业务逻辑
+│       ├── health/             # 健康检查
+│       │   └── router.py       # GET /api/health
+│       └── data_sources/       # 外部数据接入（Phase 2a+）
+│           ├── models.py       # DataSource + ExternalItem ORM
+│           ├── schemas.py      # 数据源 Pydantic schema
+│           ├── registry.py     # DataSource 注册表
+│           ├── router.py       # 数据源管理 API
+│           ├── service.py      # 数据源业务逻辑
+│           └── ingestion/      # 接入管道
+│               ├── connector.py         # DataSourceConnector ABC + RawDocument
+│               ├── pipeline.py          # IngestionPipeline（扫描 → 索引状态机）
+│               ├── store.py             # IngestionStore（JSON 原子写入，dedup 状态）
+│               ├── parser.py            # 文档解析（PDF/Word/Markdown）
+│               ├── retry.py             # jittered_retry 装饰器
+│               ├── document_index_provider.py  # DocumentIndexProvider 抽象
+│               ├── provider_factory.py  # Provider 工厂（LanceDB / Cognee / HRR / Null）
+│               ├── connectors/
+│               │   └── local_folder.py  # LocalFolderConnector（.md/.txt 扫描 + watchdog）
+│               └── providers/
+│                   ├── lancedb.py       # LanceDB 向量存储
+│                   ├── cognee.py        # Cognee 语义索引
+│                   ├── hrr.py           # HRR 语义哈希
+│                   └── null.py          # 空实现（缺省降级）
 ├── src/                        # React 前端（Vite）
 │   ├── App.tsx
 │   ├── main.tsx
@@ -186,11 +194,11 @@ career-os/
 
 ## Key Architecture Decisions
 
-- **Agent 系统**：PydanticAI 实现（`pydantic_agent.py`），支持工具调用、动态系统提示词、流式输出
-- **工具系统**：分层架构 — `ToolDefinition`（元数据）→ `ToolRegistry`（注册表）→ `ToolDispatcher`（分发）→ `Toolset`（组合），内置工具在 `backend/agent/tools/builtin/`，安全策略在 `backend/agent/tools/core/policies.py`
-- **LLM 路由**：`llm_router.py` 支持多 Provider（DashScope/OpenAI/DeepSeek 等），通过 LiteLLM 统一调用
+- **Agent 系统**：PydanticAI 实现（`modules/agent/pydantic_agent.py`），支持工具调用、动态系统提示词、流式输出
+- **工具系统**：分层架构 — `ToolDefinition`（元数据）→ `ToolRegistry`（注册表）→ `ToolDispatcher`（分发）→ `Toolset`（组合），内置工具在 `modules/agent/tools/builtin/`，安全策略在 `modules/agent/tools/core/policies.py`
+- **LLM 路由**：`pydantic_agent.py` 内 `_create_model()` 支持多 Provider（DashScope/OpenAI/DeepSeek 等），通过 LiteLLM 统一调用
 - **记忆层**：双管线 — Profile 事件（→ `.md` 投影）+ Narrative 事件（→ FTS5 `growth_events_fts`）；Cognee 提供语义搜索；`external_items` 表（Phase 2a）存储外部文档索引
-- **数据库**：SQLite（`lumen.db`），`db_migrations.py` 集中管理所有 DDL（含 FTS5 虚拟表与触发器），`lifespan` 中调用 `migrate_sqlite()`
+- **数据库**：SQLite（`lumen.db`），`core/migrations.py` 集中管理所有 DDL（含 FTS5 虚拟表与触发器），`lifespan` 中调用 `migrate_sqlite()`
 - **画像数据模型**：扩展字段存入 `profile_data` JSON 列，零 ORM 列新增
 - **聊天状态**：`chatSession.tsx` 全局 Context Provider，跨页面保持对话状态
 - **可观测性**：`agent_traces` 表记录 Agent 推理步骤、工具调用、耗时
@@ -218,10 +226,10 @@ career-os/
 
 ## Gotchas
 
-- `chat_service.py` 流式对话使用 `db.commit()` 而非 `flush()`，确保用户消息立即落库，流中断不丢失
+- `chat/service.py` 流式对话使用 `db.commit()` 而非 `flush()`，确保用户消息立即落库，流中断不丢失
 - `update_profile` 中 `null` 可以清空字段（通过 `model_fields_set` 区分"未传"和"传 null"）
 - `chatSession.tsx` 使用 `sessionStorage` 持久化 conversationId，刷新页面不丢失对话
-- `backend/agent/pydantic_agent.py` 的 `_tool_runtime` 是全局缓存，配置变更后需清空缓存，否则工具列表不会刷新
+- `modules/agent/pydantic_agent.py` 的 `_tool_runtime` 是全局缓存，配置变更后需清空缓存，否则工具列表不会刷新
 
 ## Known Limitations
 

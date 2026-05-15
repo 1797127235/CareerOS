@@ -8,7 +8,6 @@ from backend.core.logging import get_logger
 from backend.modules.agent.tools.builtin.schemas import MemorySaveArgs, MemorySearchArgs
 from backend.modules.agent.tools.core.context import ToolRuntimeContext
 from backend.modules.memory import get_memory
-from backend.modules.memory.datasets import SCOPE_DATASETS
 
 logger = get_logger(__name__)
 
@@ -24,13 +23,10 @@ async def handle_memory_search(args: dict[str, Any], ctx: ToolRuntimeContext) ->
     if not query or not query.strip():
         return "[工具错误] 请提供搜索关键词。"
 
-    datasets = SCOPE_DATASETS.get(scope) if scope else None
-
     memory_instance = get_memory()
     items = await memory_instance.recall(
         ctx.user_id,
         query,
-        datasets=datasets,
         search_mode=search_mode,
         time_filter=time_filter,
         source_scope="external" if scope == "knowledge" else "narrative",
@@ -49,6 +45,7 @@ _EVENT_TYPE_MAP: dict[str, str] = {
     "goals": "goal_updated",
     "decisions": "decision_made",
     "status": "status_changed",
+    "note": "note_added",
 }
 
 
@@ -75,7 +72,7 @@ async def handle_memory_save(args: dict[str, Any], ctx: ToolRuntimeContext) -> s
         payload = ExperiencePayload(title=section, description=content, source="Agent工具").model_dump()
     elif entity_type == "decisions":
         payload = DecisionPayload(title=section, content=content).model_dump()
-    elif entity_type in ("preferences", "goals", "status"):
+    elif entity_type in ("preferences", "goals", "status", "note"):
         payload = KeyValuePayload(key=section, value=content).model_dump()
     else:
         return f"[工具错误/UNSUPPORTED_TYPE] 不支持的类型 {entity_type}"

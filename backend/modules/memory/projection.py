@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import ClassVar
 
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
@@ -12,52 +13,136 @@ from backend.modules.memory.snapshot import invalidate_cache
 
 logger = get_logger(__name__)
 
-# 后台任务生命周期
-_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
-
 
 def cancel_background_tasks() -> None:
-    """FastAPI shutdown 钩子。"""
-    for task in _background_tasks:
-        if not task.done():
-            task.cancel()
-    _background_tasks.clear()
+    """FastAPI shutdown 钩子。取消 ProjectionManager 的所有后台任务。"""
+    ProjectionManager.cancel_all_tasks()
 
 
 class ProjectionManager:
     """投影同步与记忆管理职责 — 被 LumenMemory 组合。"""
 
+    _background_tasks: ClassVar[set[asyncio.Task]] = set()  # type: ignore[type-arg]
+
+    @classmethod
+    def cancel_all_tasks(cls) -> None:
+        for task in cls._background_tasks:
+            if not task.done():
+                task.cancel()
+        cls._background_tasks.clear()
+
     async def _update_understanding(self, user_id: str) -> None:
         """后台异步：更新 AI 综合画像。
 
-        写入 about_you.md 后使快照缓存失效，
-        确保下一次 build_snapshot 读取到最新画像。
+        写入 about_you.md 后使快照缓存失效，确保下一次 build_snapshot 读取到最新画像。
+        内部有防抖——同一用户已有任务或最近更新过时直接跳过，不创建新 task。
         """
         try:
             from backend.modules.memory.understanding import update_ai_understanding
 
             await update_ai_understanding(user_id)
-            # about_you.md 已落盘，令下次 build_snapshot 重新读取
-            invalidate_cache(user_id)
+            await invalidate_cache(user_id)
+        except asyncio.CancelledError:
+            logger.debug("AI understanding cancelled on shutdown", user_id=user_id)
         except Exception as exc:
             logger.warning("AI understanding update skipped", user_id=user_id, error=str(exc))
 
-    async def sync_projections(self, user_id: str, event_ids: list[str] | None = None) -> None:
-        """同步 .md 投影与快照缓存，按需触发 AI 画像更新。
+    async def sync_projections(
+        self,
+        user_id: str,
+        event_ids: list[str] | None = None,
+        *,
+        db=None,
+    ) -> None:
+        """同步 .md 投影 + Provider 语义索引 + 快照缓存。
 
-        调用方负责事务（自开 session 或外部 db 路径均可）。
-        Profile 事件 → .md 投影 + AI 综合画像更新
-        Narrative 事件 → FTS5 触发器自动增量索引（无需手动同步）
+        db 传入:  sync_user_md_projection 使用指定 session（不 commit）。
+        db=None:  sync_user_md_projection 自开 session + commit。
+
+        Provider 同步始终独立 session（外部 IO，不参与 DB 事务）。
         """
-        await sync_user_md_projection(user_id)
-        invalidate_cache(user_id)
-        if event_ids:
-            task = asyncio.create_task(self._update_understanding(user_id))
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+        # Phase 1: DB — .md 投影（共享 session 时可与上游写入原子提交）
+        await sync_user_md_projection(user_id, db=db)
 
-    # 别名：保持向后兼容，内部自开 session 路径与外部 db 路径行为一致
-    flush_projections = sync_projections
+        # Phase 2: 缓存 + 后台 AI 画像
+        await invalidate_cache(user_id)
+        task = asyncio.create_task(self._update_understanding(user_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+        # Phase 3: Provider 语义索引（独立 session，外部 IO，最终一致性）
+        try:
+            await self._sync_narrative_to_provider(user_id, event_ids)
+        except Exception:
+            logger.exception("Provider sync failed", user_id=user_id)
+
+    async def _sync_narrative_to_provider(self, user_id: str, event_ids: list[str] | None = None) -> None:
+        """将未索引的 Narrative 事件同步到 DocumentIndexProvider（语义搜索）。
+
+        依赖 projected_cognee_at 字段跟踪同步状态：
+        - NULL → 未同步，需要处理
+        - 非 NULL → 已同步，跳过
+
+        在 commit 后的独立 session 中执行，不影响主事务。
+        safe: Provider 不可用（NullProvider / 未安装）时静默跳过。
+        """
+        from backend.modules.data_sources.ingestion import get_document_index_provider
+        from backend.modules.data_sources.ingestion.providers.null import NullProvider
+
+        provider = get_document_index_provider()
+        if provider is None or isinstance(provider, NullProvider):
+            return
+
+        from backend.modules.memory.classifier import NARRATIVE_EVENT_TYPES
+        from backend.modules.memory.relational_store import GrowthEventRepository
+
+        async with get_async_session_maker()() as db:
+            repo = GrowthEventRepository(db)
+
+            if event_ids:
+                events = await repo.get_batch(event_ids, user_id)
+            else:
+                events = await repo.get_needing_projection(user_id, projection_field="projected_cognee_at")
+
+            narrative_events = [e for e in events if e.event_type in NARRATIVE_EVENT_TYPES]
+            if not narrative_events:
+                return
+
+            import json
+            from contextlib import suppress
+            from datetime import UTC, datetime
+
+            now = datetime.now(UTC)
+            for event in narrative_events:
+                payload = {}
+                if event.payload_json:
+                    with suppress(json.JSONDecodeError):
+                        payload = json.loads(event.payload_json)
+
+                content = (
+                    payload.get("content")
+                    or payload.get("description")
+                    or payload.get("decision")
+                    or payload.get("memory_md")
+                    or (json.dumps(payload, ensure_ascii=False) if payload else "")
+                    or f"{event.event_type}: {event.entity_type or ''}"
+                )
+
+                await provider.sync_document(
+                    content=content[:50000],
+                    doc_id=f"narrative:{event.id}",
+                    metadata={
+                        "event_type": event.event_type,
+                        "entity_type": event.entity_type,
+                        "entity_id": event.entity_id,
+                        "user_id": user_id,
+                        "source": event.source,
+                        "created_at": event.created_at.isoformat() if event.created_at else None,
+                    },
+                )
+                event.projected_cognee_at = now
+
+            await db.commit()
 
     async def force_md_rebuild(self, user_id: str) -> bool:
         """强制全量重建 .md，不检查 dirty 标记。删除事件后调用。"""
@@ -69,7 +154,11 @@ class ProjectionManager:
                 await db.commit()
             else:
                 await db.rollback()
-        invalidate_cache(user_id)
+        await invalidate_cache(user_id)
+        # 重建 .md 后也更新 AI 综合画像
+        task = asyncio.create_task(self._update_understanding(user_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
         return success
 
     async def rebuild(self, user_id: str) -> dict:
@@ -83,7 +172,11 @@ class ProjectionManager:
             else:
                 await db.rollback()
 
-        invalidate_cache(user_id)
+        await invalidate_cache(user_id)
+        # 重建 .md 后也更新 AI 综合画像
+        task = asyncio.create_task(self._update_understanding(user_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         # FTS5 触发器自动维护，无需手动索引
         return {"md_success": md_success}
@@ -135,7 +228,7 @@ class ProjectionManager:
 
         # 同步 .md 到空状态
         await sync_user_md_projection(user_id)
-        invalidate_cache(user_id)
+        await invalidate_cache(user_id)
         return count
 
     async def reset(self, user_id: str) -> dict:
@@ -148,10 +241,11 @@ class ProjectionManager:
 
         index_cleared = False
         try:
-            from backend.modules.data_sources.ingestion.document_index_provider import get_document_index_provider
+            from backend.modules.data_sources.ingestion import get_document_index_provider
 
             provider = get_document_index_provider()
-            index_cleared = await provider.clear()
+            if provider is not None:
+                index_cleared = await provider.clear()
         except Exception as exc:
             logger.warning("Provider clear failed after reset: %s", exc)
 
@@ -161,6 +255,6 @@ class ProjectionManager:
     @staticmethod
     def cognee_status() -> str:
         """返回 Cognee 索引状态：'ready' | 'not_initialized' | 'error'。"""
-        from backend.modules.memory.cognify_loop import get_cognee_status
+        from backend.modules.data_sources.ingestion.providers.cognee import CogneeProvider
 
-        return get_cognee_status()
+        return CogneeProvider.status()

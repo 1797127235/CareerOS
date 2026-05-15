@@ -116,7 +116,7 @@ def merge_skill_events(events: list[GrowthEvent]) -> dict[str, dict]:
 
 def merge_experience_events(events: list[GrowthEvent]) -> list[dict]:
     experiences: list[dict] = []
-    seen_titles: set[str] = set()
+    seen_keys: set[tuple[str, str]] = set()  # (title, period) 组合去重
     for event in events:
         payload = load_payload(event)
         if not payload:
@@ -125,9 +125,10 @@ def merge_experience_events(events: list[GrowthEvent]) -> list[dict]:
             validated = ExperiencePayload.model_validate(payload)
         except ValidationError:
             continue
-        if validated.title in seen_titles:
+        dedup_key = (validated.title, validated.period or "")
+        if dedup_key in seen_keys:
             continue
-        seen_titles.add(validated.title)
+        seen_keys.add(dedup_key)
         experiences.append(
             {
                 "title": validated.title,

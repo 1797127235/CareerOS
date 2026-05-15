@@ -8,19 +8,9 @@ from datetime import UTC, datetime, timedelta
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
 from backend.modules.memory.classifier import NARRATIVE_EVENT_TYPES
-
-# build_context 召回数据集：排除 DATASET_PROFILE（画像已由 build_snapshot 覆盖）
-from backend.modules.memory.datasets import (
-    DATASET_CHAT,
-    DATASET_KNOWLEDGE,
-    DATASET_REFERENCE,
-    DATASET_REFLECTION,
-)
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.memory.search import MemoryItem, search_all
 from backend.modules.memory.snapshot import build_snapshot, get_context_conv_ids
-
-_RECALL_DATASETS = [DATASET_CHAT, DATASET_KNOWLEDGE, DATASET_REFERENCE, DATASET_REFLECTION]
 
 logger = get_logger(__name__)
 
@@ -83,8 +73,11 @@ class MemorySearcher:
         except Exception:
             return None
 
-    async def list_events(self, user_id: str) -> list[dict]:
+    async def list_events(self, user_id: str, *, limit: int = 200) -> list[dict]:
         """按时间倒序列出用户事件（含 key-value 去重）。
+
+        Args:
+            limit: 最大返回条数，防止数据量大时内存溢出。
 
         Returns:
             [{"id": str, "memory": str, "created_at": str|None, "categories": [str]}, ...]
@@ -95,7 +88,10 @@ class MemorySearcher:
 
         async with get_async_session_maker()() as db:
             result = await db.execute(
-                select(GrowthEvent).where(GrowthEvent.user_id == user_id).order_by(GrowthEvent.created_at.desc())
+                select(GrowthEvent)
+                .where(GrowthEvent.user_id == user_id)
+                .order_by(GrowthEvent.created_at.desc())
+                .limit(limit)
             )
             events = result.scalars().all()
 
@@ -176,7 +172,6 @@ class MemorySearcher:
         user_id: str,
         query: str,
         limit: int = 10,
-        datasets: list[str] | None = None,
         *,
         search_mode: str = "keyword",
         time_filter: str | None = None,
@@ -204,7 +199,6 @@ class MemorySearcher:
             user_id,
             query,
             limit=limit,
-            datasets=datasets,
             source_scope=source_scope,
             include_provider=include_provider,
         )
@@ -226,7 +220,7 @@ class MemorySearcher:
         """
         static_ctx = await build_snapshot(user_id)
 
-        recent_ids = get_context_conv_ids(user_id)
+        recent_ids = await get_context_conv_ids(user_id)
 
         dynamic_parts: list[str] = []
         if user_input:
@@ -236,18 +230,18 @@ class MemorySearcher:
                     user_input,
                     limit=8,
                     source_scope="all",
-                    datasets=_RECALL_DATASETS,
                 )
                 if items:
                     lines = ["【相关记忆】"]
                     for item in items:
-                        if item.id in recent_ids:
+                        # recent_ids 为 None 表示缓存过期/未知，不做去重（保守策略）
+                        if recent_ids is not None and item.id in recent_ids:
                             continue
                         lines.append(f"- {item.content[:300]}")
                     if len(lines) > 1:
                         dynamic_parts.append("\n".join(lines))
             except Exception:
-                pass
+                logger.exception("L2 recall failed", user_id=user_id, user_input=user_input)
 
         all_parts = [p for p in [static_ctx, *dynamic_parts] if p]
         if conversation_summary:

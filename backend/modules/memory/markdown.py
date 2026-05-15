@@ -94,26 +94,20 @@ def write_memory(user_id: str, content: str) -> None:
     (memory_dir(user_id) / "memory.md").write_text(content, encoding="utf-8")
 
 
-def _truncate_to_limit(content: str, limit: int, *, keep_tail: bool = False) -> str:
+def _truncate_to_limit(content: str, limit: int) -> str:
     if len(content) <= limit:
         return content
-    if keep_tail:
-        truncated = content[-limit:]
-        first_newline = truncated.find("\n\n")
-        if first_newline >= 0:
-            truncated = truncated[first_newline + 2 :]
-    else:
-        truncated = content[:limit]
-        last_newline = truncated.rfind("\n\n")
-        if last_newline > 0:
-            truncated = truncated[:last_newline]
-    logger.warning("Content truncated", orig=len(content), truncated=len(truncated), keep_tail=keep_tail)
+    truncated = content[:limit]
+    last_newline = truncated.rfind("\n\n")
+    if last_newline > 0:
+        truncated = truncated[:last_newline]
+    logger.warning("Content truncated", orig=len(content), truncated=len(truncated))
     return truncated
 
 
-def _write_md_file_safe(path: str, content: str, max_chars: int | None = None, *, keep_tail: bool = False) -> None:
+def _write_md_file_safe(path: str, content: str, max_chars: int | None = None) -> None:
     if max_chars is not None:
-        content = _truncate_to_limit(content, max_chars, keep_tail=keep_tail)
+        content = _truncate_to_limit(content, max_chars)
     dir_name = os.path.dirname(path)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=dir_name, suffix=".tmp", delete=False) as handle:
         handle.write(content)
@@ -168,18 +162,6 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
 
         _write_md_file_safe(str(d / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
 
-        # 清理历史 .md 碎片文件（迁移后不再使用）
-        for legacy in ("skills.md", "experiences.md", "documents.md", "patterns.md"):
-            p = d / legacy
-            if p.exists():
-                p.unlink(missing_ok=True)
-
-        entities_dir = d / "entities"
-        if entities_dir.exists():
-            import shutil as _shutil
-
-            _shutil.rmtree(entities_dir, ignore_errors=True)
-
         from datetime import UTC, datetime
 
         now = datetime.now(UTC)
@@ -207,29 +189,57 @@ def read_about_you(user_id: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def write_about_you(user_id: str, content: str) -> None:
+_META_RE = __import__("re").compile(r"^<!-- lumen-meta:.*?-->\n?")
+
+
+def _strip_meta(content: str) -> str:
+    """剥离 about_you.md 的元数据注释行，返回纯内容。"""
+    return _META_RE.sub("", content, count=1)
+
+
+def write_about_you(user_id: str, content: str, *, event_count: int = 0) -> None:
+    """写入 AI 综合画像。
+
+    首行附加元数据注释，记录覆盖事件数和生成时间，
+    便于后续判断画像时效性和事件覆盖窗口。
+    """
+    from datetime import UTC, datetime
+
     ensure_memory_dirs(user_id)
+    now = datetime.now(UTC).isoformat()
+    meta = f"<!-- lumen-meta: events={event_count} generated_at={now} -->\n"
     _write_md_file_safe(
         str(memory_dir(user_id) / "about_you.md"),
-        content,
+        meta + content,
         max_chars=MD_CHAR_LIMITS.get("about_you", 2000),
     )
 
 
-async def sync_user_md_projection(user_id: str) -> bool:
-    async with get_async_session_maker()() as db:
-        from sqlalchemy import func as _func
+_INCREMENTAL_DIRTY_THRESHOLD = 0  # 保留常量消除 magic number；dirty > 0 即全量重建
 
-        dirty = await db.execute(
+
+async def sync_user_md_projection(user_id: str, *, db: AsyncSession | None = None) -> bool:
+    """同步用户的 .md 投影。
+
+    db 传入:   使用指定 session（调用方负责 commit/rollback）。
+    db=None:   自开 session + commit。
+    """
+    from sqlalchemy import func as _func
+
+    if db is not None:
+        dirty_count = await db.execute(
             select(_func.count(GrowthEvent.id)).where(
                 GrowthEvent.user_id == user_id,
                 GrowthEvent.projected_md_at.is_(None),
             )
         )
-        if (dirty.scalar() or 0) == 0:
+        dirty = dirty_count.scalar() or 0
+        if dirty == 0:
             return True
+        return await project_user_to_md(db, user_id)
 
-        success = await project_user_to_md(db, user_id)
+    async with get_async_session_maker()() as db:
+        success = await sync_user_md_projection(user_id, db=db)
         if success:
             await db.commit()
         else:

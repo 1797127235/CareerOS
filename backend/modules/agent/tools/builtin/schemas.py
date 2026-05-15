@@ -77,7 +77,7 @@ class MemorySaveArgs(TypedDict):
     """memory_save 工具的输入参数。"""
 
     entity_type: str
-    """类型 — skills / experiences / preferences / goals / decisions / status。"""
+    """类型 — skills / experiences / preferences / goals / decisions / status / note。"""
 
     section: str
     """标题/名称。"""

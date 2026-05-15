@@ -89,8 +89,6 @@ def create_agent() -> Agent[LumenDeps, str]:
     """
     from pydantic_ai import Agent, RunContext
 
-    # 旧系统已迁移完毕，discover_toolsets 不再使用
-
     model = _create_model()
 
     # 新工具运行时（Registry + Dispatcher + Adapter）

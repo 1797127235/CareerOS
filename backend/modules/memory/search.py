@@ -1,7 +1,9 @@
 """统一搜索层 — 从多个存储源召回记忆。
 
-主路径：FTS5 全文搜索（Narrative 事件 + 外部文档）
-语义路径：DocumentIndexProvider（Cognee/LanceDB/HRR），统一覆盖全部数据
+    主路径：FTS5 全文搜索（Narrative 事件 + 外部文档）
+    语义路径：DocumentIndexProvider（Cognee/LanceDB/HRR）
+      - Narrative GrowthEvent：通过 projected_cognee_at 增量同步
+      - 外部文档：通过 IngestionPipeline._memory_worker 同步
 
 Profile 事件不走搜索索引 — L0 固定注入已覆盖。"""
 
@@ -21,12 +23,6 @@ logger = get_logger(__name__)
 
 _CJK_RE = _re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
 
-# Provider 结果解析正则
-_PROVIDER_RESULT_RE = _re.compile(
-    r"\[来源:\s*([^\]]+)\](?:\n|\r\n?)(.*?)(?=\n\n|\[来源:|\Z)",
-    _re.DOTALL,
-)
-
 
 class MemoryItem(BaseModel):
     """搜索结果条目。"""
@@ -42,7 +38,6 @@ async def search_all(
     query: str,
     limit: int = 10,
     *,
-    datasets: list[str] | None = None,
     include_provider: bool = True,
     source_scope: str = "narrative",  # "narrative" | "external" | "all"
 ) -> list[MemoryItem]:
@@ -54,8 +49,9 @@ async def search_all(
     seen: set[str] = set()
     results: list[MemoryItem] = []
 
-    # Provider 语义搜索：统一覆盖 narrative + external
-    if include_provider:
+    # Provider 语义搜索：source_scope 为 "narrative" 或 "all" 时启用
+    # （narrative 事件同样存储在 Provider 中，不限于 FTS5）
+    if include_provider and source_scope in ("narrative", "all"):
         results.extend(await _search_provider(query, limit, seen))
 
     if source_scope in ("narrative", "all"):
@@ -117,12 +113,14 @@ async def _search_fts5(user_id: str, query: str, limit: int, seen: set[str]) -> 
                         categories=[row[2]] if row[2] else [],
                     )
                 )
-    except Exception as exc:
-        logger.warning("FTS5 search failed", error=str(exc))
+    except Exception:
+        logger.exception("FTS5 search failed", user_id=user_id, query=query)
     return results
 
 
 def _fts_query(table_name: str):
+    from sqlalchemy import bindparam
+
     return text(f"""
         SELECT ge.id, ge.payload_json, ge.event_type, ge.entity_type, ge.created_at
         FROM growth_events ge
@@ -132,7 +130,7 @@ def _fts_query(table_name: str):
           AND {table_name} MATCH :q
         ORDER BY ge.created_at DESC
         LIMIT :lim
-    """)
+    """).bindparams(bindparam("etypes", expanding=True))
 
 
 async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id: str | None = None) -> list[MemoryItem]:
@@ -190,13 +188,7 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
                 uri = row[4] or ""
                 snippet = row[1][:300] if row[1] else ""
                 # 格式化返回内容，包含引用信息
-                content = (
-                    f"标题: {title}\n"
-                    f"来源: {source_name}\n"
-                    f"路径: {uri}\n"
-                    f"片段: {snippet}\n"
-                    f"item_id: {row[0]}"
-                )
+                content = f"标题: {title}\n来源: {source_name}\n路径: {uri}\n片段: {snippet}\nitem_id: {row[0]}"
                 results.append(
                     MemoryItem(
                         id=eid,
@@ -209,8 +201,8 @@ async def _search_external_fts5(query: str, limit: int, seen: set[str], user_id:
                         categories=[f"external:{source_name}"],
                     )
                 )
-    except Exception as exc:
-        logger.warning("external_fts5 search failed", error=str(exc))
+    except Exception:
+        logger.exception("external_fts5 search failed", query=query)
     return results
 
 
@@ -263,13 +255,7 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
                 title = row[5] or "未命名文档"
                 uri = row[4] or ""
                 snippet = row[1][:300] if row[1] else ""
-                content = (
-                    f"标题: {title}\n"
-                    f"来源: {source_name}\n"
-                    f"路径: {uri}\n"
-                    f"片段: {snippet}\n"
-                    f"item_id: {row[0]}"
-                )
+                content = f"标题: {title}\n来源: {source_name}\n路径: {uri}\n片段: {snippet}\nitem_id: {row[0]}"
                 results.append(
                     MemoryItem(
                         id=eid,
@@ -282,13 +268,16 @@ async def _search_external_like(query: str, limit: int, seen: set[str], user_id:
                         categories=[f"external:{source_name}"],
                     )
                 )
-    except Exception as exc:
-        logger.warning("external LIKE search failed", error=str(exc))
+    except Exception:
+        logger.exception("external LIKE search failed", query=query)
     return results
 
 
 async def _search_provider(query: str, limit: int, seen: set[str]) -> list[MemoryItem]:
-    """DocumentIndexProvider 语义搜索（LanceDB/HRR）。"""
+    """DocumentIndexProvider 语义搜索（LanceDB/HRR/Cognee）。
+
+    直接消费 list[ProviderHit]，不再依赖字符串正则解析。
+    """
     results: list[MemoryItem] = []
     try:
         from backend.modules.data_sources.ingestion import get_document_index_provider
@@ -298,29 +287,27 @@ async def _search_provider(query: str, limit: int, seen: set[str]) -> list[Memor
         if provider is None or isinstance(provider, NullProvider):
             return results
 
-        text_result = await provider.prefetch(query)
-        if not text_result:
-            return results
-
-        # 解析 Provider 返回格式: [来源: doc_id]\ncontent
-        for match in _PROVIDER_RESULT_RE.finditer(text_result):
-            source_info = match.group(1).strip()
-            content = match.group(2).strip()
-            if not content or content in seen:
+        hits = await provider.prefetch(query)
+        for hit in hits:
+            if len(results) >= limit:
+                break
+            item_id = f"provider:{hit.doc_id}"
+            if item_id in seen:
                 continue
-            seen.add(content)
+            seen.add(item_id)
 
-            # 提取 doc_id（格式可能是 "doc_id (相似度: 0.85)"）
-            doc_id = source_info.split("(")[0].strip()
+            # 当 doc_id 为 "narrative:{event_id}" 时，同时把裸 event_id 加入 seen，
+            # 防止 _search_fts5 重复返回同一条 narrative 事件（修复 #1 重复召回）。
+            if hit.doc_id.startswith("narrative:"):
+                seen.add(hit.doc_id[10:])
+
             results.append(
                 MemoryItem(
-                    id=f"provider:{doc_id}",
-                    content=content[:500],
+                    id=item_id,
+                    content=hit.content,
                     categories=[f"provider:{provider.name}"],
                 )
             )
-            if len(results) >= limit:
-                break
-    except Exception as exc:
-        logger.warning("Provider search failed", error=str(exc))
+    except Exception:
+        logger.exception("Provider search failed", query=query)
     return results

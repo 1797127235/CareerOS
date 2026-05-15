@@ -11,7 +11,8 @@ L2 语义召回：FTS5 / Cognee 检索 Narrative 事件（由 facade.build_conte
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -36,60 +37,83 @@ class _CacheEntry:
     user_id: str
     content: str
     created_at: datetime
-    context_conv_ids: set[str]
+    last_accessed: datetime = field(default_factory=lambda: datetime.now(UTC))
+    context_conv_ids: set[str] = field(default_factory=set)
 
 
 _static_cache: dict[str, _CacheEntry] = {}
+_cache_lock = asyncio.Lock()
 
 
-def _cache_insert(entry: _CacheEntry) -> None:
-    """插入缓存条目，超出上限时驱逐最久未使用的条目。"""
-    if len(_static_cache) >= _MAX_CACHE_SIZE:
-        lru_user = min(_static_cache, key=lambda k: _static_cache[k].created_at)
-        del _static_cache[lru_user]
-    _static_cache[entry.user_id] = entry
+async def _cache_insert(entry: _CacheEntry) -> None:
+    """插入缓存条目，超出上限时驱逐最久未访问的条目（LRU）。"""
+    async with _cache_lock:
+        if len(_static_cache) >= _MAX_CACHE_SIZE:
+            lru_user = min(_static_cache, key=lambda k: _static_cache[k].last_accessed)
+            del _static_cache[lru_user]
+        _static_cache[entry.user_id] = entry
 
 
-def invalidate_cache(user_id: str) -> None:
-    _static_cache.pop(user_id, None)
+async def invalidate_cache(user_id: str) -> None:
+    async with _cache_lock:
+        _static_cache.pop(user_id, None)
 
 
-def get_recent_event_ids(user_id: str) -> set[str]:
-    """已废弃 — 请使用 get_context_conv_ids。
+async def get_context_conv_ids(user_id: str) -> set[str] | None:
+    """返回缓存中的上下文对话 ID 集合。
 
-    L2 去重现在基于对话 ID 而非事件 ID。
+    缓存缺失或过期时返回 None（调用方应视为"未知"，不做去重过滤，
+    避免过期缓存导致过滤失效）。
     """
-    import warnings
-
-    warnings.warn(
-        "get_recent_event_ids is deprecated, use get_context_conv_ids instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return get_context_conv_ids(user_id)
-
-
-def get_context_conv_ids(user_id: str) -> set[str]:
-    entry = _static_cache.get(user_id)
-    if entry is None:
-        return set()
-    if (datetime.now(UTC) - entry.created_at) >= timedelta(minutes=_CACHE_TTL_MINUTES):
-        return set()
-    return entry.context_conv_ids
+    async with _cache_lock:
+        entry = _static_cache.get(user_id)
+        if entry is None:
+            return None
+        if (datetime.now(UTC) - entry.created_at) >= timedelta(minutes=_CACHE_TTL_MINUTES):
+            _static_cache.pop(user_id, None)
+            return None
+        entry.last_accessed = datetime.now(UTC)  # LRU touch
+        return entry.context_conv_ids
 
 
 # ── L0: 固定块（数据源 = about_you.md）───────────────────────────
 
 
-def _build_fixed_block_v2(user_id: str) -> str:
-    """L0 固定块：仅使用 AI 综合画像（about_you.md）。"""
-    from backend.modules.memory.markdown import read_about_you
+_MIN_ABOUT_YOU_CHARS = 30  # 低于此视为画像不可用，而非硬编码 50
+
+
+def _build_fixed_block(user_id: str) -> str:
+    """L0 固定块：优先 AI 综合画像（about_you.md），缺失时降级到 memory.md。
+
+    剥离元数据注释行后判断内容是否可用。排除仅含模板占位符的默认文件。
+    """
+    from backend.modules.memory.markdown import _strip_meta, read_about_you, read_memory
 
     about_you = read_about_you(user_id)
-    if about_you and len(about_you.strip()) > 50:
+    about_you = _strip_meta(about_you)
+    if about_you and _has_substantive_content(about_you):
         return f"## AI 对你的理解\n{about_you.strip()}"
 
+    # 降级：about_you 不可用时，直接读取结构化画像 memory.md
+    memory_content = read_memory(user_id)
+    if memory_content and _has_substantive_content(memory_content):
+        return f"## 用户画像\n{memory_content.strip()}"
+
     return ""
+
+
+def _has_substantive_content(text: str) -> bool:
+    """判断文本是否有实质内容（非纯模板占位符）。"""
+    import re as _re
+
+    text = text.strip()
+    if len(text) <= _MIN_ABOUT_YOU_CHARS:
+        return False
+    # 移除所有"（待填写）"占位符后判断剩余内容
+    stripped = _re.sub(r"（待填写）", "", text)
+    stripped = _re.sub(r"_暂无记录_", "", stripped)
+    stripped = stripped.strip()
+    return len(stripped) > _MIN_ABOUT_YOU_CHARS
 
 
 # ── L1: 近期上下文（数据源 = Conversation + Message）────────────
@@ -196,21 +220,31 @@ async def _fetch_recent_conversations(
 # ── 构建快照 ──────────────────────────────────────────────────────
 
 
-async def build_snapshot(user_id: str) -> str:
-    cached = _static_cache.get(user_id)
-    if cached and (datetime.now(UTC) - cached.created_at) < timedelta(minutes=_CACHE_TTL_MINUTES):
-        return cached.content
+async def _evict_expired_cache() -> None:
+    """驱逐所有过期的缓存条目（定期清理，防止内存泄漏）。"""
+    now = datetime.now(UTC)
+    async with _cache_lock:
+        expired = [k for k, v in _static_cache.items() if (now - v.created_at) >= timedelta(minutes=_CACHE_TTL_MINUTES)]
+        for k in expired:
+            del _static_cache[k]
 
-    fixed_block = _build_fixed_block_v2(user_id)
+
+async def build_snapshot(user_id: str) -> str:
+    await _evict_expired_cache()
+    async with _cache_lock:
+        cached = _static_cache.get(user_id)
+        if cached and (datetime.now(UTC) - cached.created_at) < timedelta(minutes=_CACHE_TTL_MINUTES):
+            cached.last_accessed = datetime.now(UTC)
+            return cached.content
+
+    fixed_block = _build_fixed_block(user_id)
 
     async with get_async_session_maker()() as db:
         conversations, messages_by_conv = await _fetch_recent_conversations(user_id, db)
 
     if not fixed_block and not conversations:
         content = "【用户画像为空】"
-        _cache_insert(
-            _CacheEntry(user_id=user_id, content=content, created_at=datetime.now(UTC), context_conv_ids=set())
-        )
+        await _cache_insert(_CacheEntry(user_id=user_id, content=content, created_at=datetime.now(UTC)))
         return content
 
     # L1 近期上下文
@@ -219,7 +253,12 @@ async def build_snapshot(user_id: str) -> str:
     parts = [p for p in [fixed_block, context_block] if p]
     content = "\n\n".join(parts) if parts else "【用户画像为空】"
 
-    _cache_insert(
-        _CacheEntry(user_id=user_id, content=content, created_at=datetime.now(UTC), context_conv_ids=conv_ids)
+    await _cache_insert(
+        _CacheEntry(
+            user_id=user_id,
+            content=content,
+            created_at=datetime.now(UTC),
+            context_conv_ids=conv_ids,
+        )
     )
     return content

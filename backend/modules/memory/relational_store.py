@@ -25,6 +25,7 @@ def _make_payload_hash(payload: dict | None) -> str | None:
 
 
 def _make_dedupe_key(
+    user_id: str,
     event_type: str,
     entity_type: str | None,
     entity_id: str | None,
@@ -32,6 +33,7 @@ def _make_dedupe_key(
 ) -> str:
     raw_key = "|".join(
         [
+            user_id,
             event_type or "",
             entity_type or "",
             entity_id or "",
@@ -54,11 +56,11 @@ class BaseRepository(Generic[T]):
         return instance
 
     async def get_by_id(self, id: int) -> T | None:
-        result = await self.db.execute(select(self.model).where(self.model.id == id))
+        result = await self.db.execute(select(self.model).where(self.model.id == id))  # type: ignore[attr-defined]
         return result.scalar_one_or_none()
 
     async def list_by_user(self, user_id: str, **filters: Any) -> list[T]:
-        stmt = select(self.model).where(self.model.user_id == user_id)
+        stmt = select(self.model).where(self.model.user_id == user_id)  # type: ignore[attr-defined]
         for key, value in filters.items():
             if value is not None:
                 stmt = stmt.where(getattr(self.model, key) == value)
@@ -86,7 +88,7 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         source: str = "system",
     ) -> GrowthEvent | None:
         payload_hash = _make_payload_hash(payload)
-        dedupe_key = _make_dedupe_key(event_type, entity_type, entity_id, payload_hash)
+        dedupe_key = _make_dedupe_key(user_id, event_type, entity_type, entity_id, payload_hash)
 
         existing = await self.db.execute(select(GrowthEvent.id).where(GrowthEvent.dedupe_key == dedupe_key))
         if existing.scalar_one_or_none() is not None:
@@ -108,75 +110,18 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         await self.db.flush()
         return event
 
-    _FTS_TRIGGERS = (
-        "trg_growth_events_ad",
-        "trg_growth_events_tri_ad",
-        "trg_growth_events_au",
-        "trg_growth_events_tri_au",
-    )
-
     async def drop_fts_triggers(self) -> None:
-        for name in self._FTS_TRIGGERS:
+        """删除 GrowthEvent FTS 触发器（批量删除前的安全操作）。"""
+        from backend.core.migrations import _GROWTH_EVENTS_FTS_TRIGGER_NAMES
+
+        for name in _GROWTH_EVENTS_FTS_TRIGGER_NAMES:
             await self.db.execute(text(f"DROP TRIGGER IF EXISTS {name}"))
 
     async def rebuild_fts_index(self) -> None:
-        for name in self._FTS_TRIGGERS:
-            await self.db.execute(text(f"DROP TRIGGER IF EXISTS {name}"))
+        """全量重建 GrowthEvent FTS5 索引。委托给 migrations.py 的共享实现。"""
+        from backend.core.migrations import rebuild_growth_events_fts
 
-        await self.db.execute(text("DROP TABLE IF EXISTS growth_events_fts"))
-        await self.db.execute(text("DROP TABLE IF EXISTS growth_events_fts_trigram"))
-        await self.db.execute(
-            text("CREATE VIRTUAL TABLE growth_events_fts USING fts5(event_type, entity_type, entity_id, payload_json)")
-        )
-        await self.db.execute(
-            text(
-                "CREATE VIRTUAL TABLE growth_events_fts_trigram USING fts5("
-                "event_type, entity_type, entity_id, payload_json, tokenize='trigram')"
-            )
-        )
-
-        for tbl in ("growth_events_fts", "growth_events_fts_trigram"):
-            await self.db.execute(
-                text(
-                    f"INSERT INTO {tbl}(rowid, event_type, entity_type, entity_id, payload_json) "
-                    "SELECT rowid, event_type, entity_type, entity_id, COALESCE(payload_json, '') FROM growth_events"
-                )
-            )
-
-        await self.db.execute(
-            text(
-                "CREATE TRIGGER trg_growth_events_ad AFTER DELETE ON growth_events BEGIN "
-                "INSERT INTO growth_events_fts(growth_events_fts, rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json); END"
-            )
-        )
-        await self.db.execute(
-            text(
-                "CREATE TRIGGER trg_growth_events_tri_ad AFTER DELETE ON growth_events BEGIN "
-                "INSERT INTO growth_events_fts_trigram(growth_events_fts_trigram, rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json); END"
-            )
-        )
-        await self.db.execute(
-            text(
-                "CREATE TRIGGER trg_growth_events_au AFTER UPDATE ON growth_events BEGIN "
-                "INSERT INTO growth_events_fts(growth_events_fts, rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json); "
-                "INSERT INTO growth_events_fts(rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json); END"
-            )
-        )
-        await self.db.execute(
-            text(
-                "CREATE TRIGGER trg_growth_events_tri_au AFTER UPDATE ON growth_events BEGIN "
-                "INSERT INTO growth_events_fts_trigram(growth_events_fts_trigram, rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES ('delete', old.rowid, old.event_type, old.entity_type, old.entity_id, old.payload_json); "
-                "INSERT INTO growth_events_fts_trigram(rowid, event_type, entity_type, entity_id, payload_json) "
-                "VALUES (new.rowid, new.event_type, new.entity_type, new.entity_id, new.payload_json); END"
-            )
-        )
-
-        logger.info("FTS index rebuilt")
+        await rebuild_growth_events_fts(self.db)
 
     async def get_batch(self, event_ids: list[str], user_id: str | None = None) -> list[GrowthEvent]:
         if not event_ids:
