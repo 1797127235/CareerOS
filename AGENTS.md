@@ -140,7 +140,6 @@ career-os/
 │       │   ├── deps.py             # Agent 依赖注入（LumenDeps）
 │       │   ├── models.py           # AgentTrace 可观测性
 │       │   └── tools/
-│       │       ├── file_security.py     # 文件安全（路径校验、大小限制、二进制检测）
 │       │       ├── builtin/             # 内置工具 Handler
 │       │       │   ├── memory.py        # memory_search, memory_save
 │       │       │   ├── profile.py       # get_profile, update_profile

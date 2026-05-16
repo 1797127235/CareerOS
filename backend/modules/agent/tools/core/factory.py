@@ -7,10 +7,6 @@ from backend.modules.agent.tools.builtin import (
     handle_data_source_list,
     handle_data_source_search,
     handle_data_source_status,
-    handle_file_list,
-    handle_file_read,
-    handle_file_search,
-    handle_file_write,
     handle_get_profile,
     handle_memory_save,
     handle_memory_search,
@@ -34,79 +30,6 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
 
     registry = ToolRegistry()
     resolver = ToolsetResolver()
-
-    # ── 注册文件工具 ──
-    registry.register(
-        ToolDefinition(
-            name="file_read",
-            description="读取文本文件内容，返回带行号的文本。支持分页读取大文件。",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "文件路径（相对或绝对）"},
-                    "offset": {"type": "integer", "description": "起始行号", "default": 1},
-                    "limit": {"type": "integer", "description": "最大行数", "default": 500},
-                },
-                "required": ["path"],
-            },
-            category="builtin",
-            read_only=True,
-            handler=handle_file_read,
-        )
-    )
-
-    registry.register(
-        ToolDefinition(
-            name="file_write",
-            description="写入或覆盖文本文件。会自动创建父目录。",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "文件路径"},
-                    "content": {"type": "string", "description": "文件内容"},
-                },
-                "required": ["path", "content"],
-            },
-            category="builtin",
-            read_only=False,
-            requires_approval=True,
-            handler=handle_file_write,
-        )
-    )
-
-    registry.register(
-        ToolDefinition(
-            name="file_list",
-            description="列出目录内容，显示文件和子目录。",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "目录路径（可选，默认当前目录）"},
-                },
-            },
-            category="builtin",
-            read_only=True,
-            handler=handle_file_list,
-        )
-    )
-
-    registry.register(
-        ToolDefinition(
-            name="file_search",
-            description="在目录下递归搜索文件名匹配正则表达式的文件。",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "搜索目录（可选，默认当前目录）"},
-                    "pattern": {"type": "string", "description": "正则表达式模式"},
-                },
-                "required": ["pattern"],
-            },
-            category="builtin",
-            read_only=True,
-            handler=handle_file_search,
-        )
-    )
 
     # ── 注册记忆工具 ──
     registry.register(
@@ -264,14 +187,6 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
 
     # ── 定义 toolsets ──
     resolver.register(
-        "file",
-        ToolsetConfig(
-            description="文件系统工具",
-            tools=["file_read", "file_write", "file_list", "file_search"],
-        ),
-    )
-
-    resolver.register(
         "chat-core",
         ToolsetConfig(
             description="核心对话工具",
@@ -291,12 +206,15 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
         "default-chat",
         ToolsetConfig(
             description="默认对话配置",
-            includes=["chat-core", "data-source-read", "file"],
+            includes=["chat-core", "data-source-read", "mcp"],
         ),
     )
 
     # ── 注册 DocumentIndexProvider 动态工具（覆盖同名 built-in）──
     _register_provider_tools(registry, resolver)
+
+    # ── 注册 MCP 外部工具 ──
+    _register_mcp_tools(registry, resolver)
 
     dispatcher = ToolDispatcher(registry)
     return registry, dispatcher, resolver
@@ -354,3 +272,17 @@ def _register_provider_tools(registry: ToolRegistry, resolver: ToolsetResolver) 
                 tools=list(ds_tools),
             ),
         )
+
+
+def _register_mcp_tools(registry: ToolRegistry, resolver: ToolsetResolver) -> list[str]:
+    """从已连接的 MCP Server 发现工具并注册到 Registry。
+
+    如果 MCP Manager 尚未初始化或没有连接，静默跳过。
+    """
+    try:
+        from backend.modules.agent.tools.mcp.tool_bridge import discover_and_register
+
+        return discover_and_register(registry, resolver)
+    except Exception:
+        # MCP 模块未就绪或连接失败时不阻塞主流程
+        return []

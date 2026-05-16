@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.core.config import get_settings
 from backend.core.logging import RequestLoggingMiddleware, get_logger
 from backend.core.startup import lifespan
+from backend.modules.agent.tools.mcp.router import router as mcp_router
 from backend.modules.chat.router import router as chat_router
 from backend.modules.config.router import router as config_router
 from backend.modules.data_sources.router import router as data_sources_router
@@ -43,6 +44,7 @@ app.include_router(memory_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(data_sources_router, prefix="/api")
+app.include_router(mcp_router)
 
 # ── 静态文件托管：dist/ 存在时始终挂载 ──
 static_dir = Path(__file__).parent.parent / "dist"

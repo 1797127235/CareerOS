@@ -128,6 +128,18 @@ async def lifespan(app: FastAPI):
 
         ProjectionManager.start_provider_compensation_loop()
 
+    # 连接已配置的 MCP Servers
+    with contextlib.suppress(Exception):
+        from backend.modules.agent.tools.mcp.client_manager import get_mcp_manager
+
+        await get_mcp_manager().connect_all()
+
     yield
+
+    # 断开 MCP Servers
+    with contextlib.suppress(Exception):
+        from backend.modules.agent.tools.mcp.client_manager import get_mcp_manager
+
+        await get_mcp_manager().disconnect_all()
 
     await _shutdown(get_engine(), ingestion_task)

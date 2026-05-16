@@ -87,7 +87,7 @@ class PathPolicy:
     def validate(cls, path: Path, allow_write: bool = False) -> tuple[bool, str]:
         """验证文件/目录是否可访问。"""
         if path.is_dir() and not allow_write:
-            return False, f"{path.name} 是目录，请使用 file_list 列出内容"
+            return False, f"{path.name} 是目录，无法以文本形式读取"
         return True, ""
 
 
@@ -103,6 +103,10 @@ class LoopGuardPolicy:
     3. 非读工具调用后重置连续计数
     """
 
+    # 注：此前缀原为内置文件工具设计（file_read / file_search 等）。
+    # 内置工具已移除，当前由 MCP filesystem server 提供文件操作。
+    # 该检测对 MCP 工具（命名格式为 {server}_{tool}）不生效，
+    # 但 BudgetPolicy（6 次调用上限）仍提供全局保护。
     _FILE_TOOL_PREFIXES = ("file_", "read_", "search_", "list_")
     _LOOP_THRESHOLD = 2
     _EXPLORATION_LIMIT = 6

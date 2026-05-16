@@ -2,59 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import NotRequired, TypedDict
-
-# ── 文件工具 ──
-
-
-class FileReadArgs(TypedDict):
-    """file_read 工具的输入参数。"""
-
-    _resolved_path: Path
-    """Dispatcher 解析后的绝对路径。"""
-
-    offset: NotRequired[int]
-    """起始行号（默认 1）。"""
-
-    limit: NotRequired[int]
-    """最大行数（默认 500，最大 2000）。"""
-
-
-class FileWriteArgs(TypedDict):
-    """file_write 工具的输入参数。"""
-
-    _resolved_path: Path
-    """Dispatcher 解析后的绝对路径。"""
-
-    content: str
-    """文件内容。"""
-
-
-class FileListArgs(TypedDict):
-    """file_list 工具的输入参数。"""
-
-    path: NotRequired[str]
-    """原始路径参数（可选）。"""
-
-    _resolved_path: NotRequired[Path]
-    """Dispatcher 解析后的绝对路径（path 为空时为 None）。"""
-
-
-class FileSearchArgs(TypedDict):
-    """file_search 工具的输入参数。"""
-
-    pattern: str
-    """正则表达式模式。"""
-
-    path: NotRequired[str]
-    """原始路径参数（可选）。"""
-
-    _resolved_path: NotRequired[Path]
-    """Dispatcher 解析后的绝对路径（path 为空时为 None）。"""
-
-
-# ── 记忆工具 ──
 
 
 class MemorySearchArgs(TypedDict):
@@ -84,9 +32,6 @@ class MemorySaveArgs(TypedDict):
 
     content: str
     """具体内容。"""
-
-
-# ── 画像工具 ──
 
 
 class GetProfileArgs(TypedDict):

@@ -149,8 +149,21 @@ def _config_fingerprint() -> str:
 
 
 def _tool_fingerprint() -> str:
-    """计算工具配置指纹，用于判断是否需要重建工具运行时。"""
-    return "v1"
+    """计算工具配置指纹，用于判断是否需要重建工具运行时。
+
+    包含 MCP 已发现工具的排序哈希，这样新增/删除 MCP server 时
+    Agent 自动重建。
+    """
+    try:
+        from backend.modules.agent.tools.mcp.client_manager import get_mcp_manager
+
+        mcp_tools: list[str] = []
+        for server_name, tools in get_mcp_manager().discover_tools():
+            for t in tools:
+                mcp_tools.append(f"{server_name}:{t['name']}")
+        return hashlib.sha256("|".join(sorted(mcp_tools)).encode()).hexdigest()[:16]
+    except Exception:
+        return "v1"
 
 
 def get_agent() -> Agent[LumenDeps, str]:

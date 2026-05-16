@@ -1,5 +1,8 @@
-"""MCP 桥接工具包 — 占位。
+"""MCP Client 模块 — 连接外部 MCP Server，将其工具注入 Lumen Agent。"""
 
-Phase 2b/2c 将在此实现 filesystem / GitHub 桥接工具。
-当前为空包，registry scan 时自动跳过。
-"""
+from __future__ import annotations
+
+from backend.modules.agent.tools.mcp.client_manager import get_mcp_manager
+from backend.modules.agent.tools.mcp.tool_bridge import discover_and_register
+
+__all__ = ["discover_and_register", "get_mcp_manager"]
