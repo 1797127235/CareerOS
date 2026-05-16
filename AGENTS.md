@@ -93,9 +93,7 @@ career-os/
 │       │   └── review_service.py # 后台记忆审查（Agent fork 审查对话）
 │       ├── profile/            # 画像模块
 │       │   ├── models.py       # User + UserProfile（通用伴侣画像，profile_data JSON 为核心）
-│       │   ├── schemas.py      # ProfileResponse, ProfileUpdate, SkillPayload 等
-│       │   ├── service.py      # 画像结构化读写业务
-│       │   └── resume_service.py  # 简历解析
+│       │   └── schemas.py      # ProfilePayload, KeyValuePayload, DecisionPayload
 │       ├── config/             # 配置模块
 │       │   ├── router.py       # GET/POST /api/config, /api/config/providers, /api/config/test
 │       │   └── service.py      # 配置业务逻辑
@@ -125,10 +123,11 @@ career-os/
 │   ├── main.tsx
 │   ├── index.css
 │   ├── pages/
-│   │   ├── Chat.tsx            # SSE 流式对话 + 历史抽屉 + 空态示例
-│   │   ├── Profile.tsx         # 画像页：教育详情/技能/获奖 + inline 编辑
+│   │   ├── Chat.tsx            # SSE 流式对话 + 历史抽屉 + 空态示例 + 思考过程
+│   │   ├── Profile.tsx         # 画像页：AI 综合画像 + 主动塑造 + 模式/心愿/此刻/时间线
 │   │   ├── Memories.tsx        # 记忆管理页
-│   │   └── Settings.tsx        # 设置页：Provider 选择 + API Key
+│   │   ├── MyWorld.tsx         # 外部数据源管理（我的世界）
+│   │   └── Settings.tsx        # 设置页：Provider 选择 + API Key + 数据源配置
 │   ├── components/
 │   │   ├── Card.tsx
 │   │   ├── EmptyState.tsx
@@ -177,9 +176,7 @@ career-os/
 | `POST` | `/api/memory/rebuild` | 重建记忆（.md + FTS5 + Provider 语义索引） |
 | `GET` | `/api/memory/search` | 语义搜索记忆 |
 | `DELETE` | `/api/memory/{event_id}` | 删除指定记忆事件 |
-| `POST` | `/api/memory/upload-resume` | 上传简历解析并生成事件 |
-| `GET` | `/api/memory/profile-structured` | 获取结构化画像数据 |
-| `POST` | `/api/memory/profile-update` | 前端手动更新画像 |
+| `POST` | `/api/memory/tell` | 用户主动告诉 AI（兴趣/价值观/关系/经历/反思） |
 | `GET` | `/api/memory/understanding` | 获取 AI 综合画像 |
 | `POST` | `/api/memory/understanding/refresh` | 手动触发 AI 画像重新生成 |
 | `POST` | `/api/memory/understanding/correct` | 用户手动纠正 AI 画像文本 |
@@ -211,14 +208,6 @@ career-os/
 - `EXTERNAL_DATA_ENABLED` — `true` 开启外部数据接入（Phase 2a）
 - `EXTERNAL_DATA_DIRS` — 逗号分隔的本地目录路径，如 `C:\Obsidian,C:\Notes`
 
-## 已移除端点（Workstream C 重构）
-
-以下端点已在架构重构中移除，前端不再调用：
-
-- ~~`GET /api/memory/profile-structured`~~ → 由 `/api/memory/understanding` 替代
-- ~~`POST /api/memory/profile-update`~~ → 由 `/api/memory/understanding/correct` 替代
-- ~~`POST /api/memory/upload-resume`~~ → 简历解析服务已移除
-
 ## Code Style
 
 - Python 3.11+，类型提示（`from __future__ import annotations`）
@@ -226,7 +215,7 @@ career-os/
 - Pydantic v2（`BaseSettings`, `BaseModel`）
 - 前端 React 19 + TypeScript + Tailwind CSS 4
 - ruff 做 lint + format（`pyproject.toml` 配置）
-- pytest + pytest-asyncio（30 条测试，`pytest` 运行）
+- pytest + pytest-asyncio（104 条测试，`pytest` 运行）
 
 ## Gotchas
 
