@@ -11,7 +11,7 @@ import Chat from './pages/Chat.tsx'
 import Profile from './pages/Profile.tsx'
 import Memories from './pages/Memories.tsx'
 
-import KnowledgeBase from './pages/KnowledgeBase.tsx'
+import MyWorld from './pages/MyWorld.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -26,7 +26,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="targets/:id" element={<Navigate to="/" replace />} />
           <Route path="memories" element={<Memories />} />
 
-          <Route path="knowledge-base" element={<KnowledgeBase />} />
+          <Route path="my-world" element={<MyWorld />} />
         </Route>
       </Routes>
     </BrowserRouter>

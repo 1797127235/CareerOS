@@ -1,7 +1,7 @@
 import { cachedUserId, http } from "./core";
 
 export type MemoryStats = {
-  status: string; // "ready" | "no_api_key" | "error" | "not_initialized"
+  status: string;
   count: number;
 };
 
@@ -44,80 +44,6 @@ export function deleteMemory(id: string): Promise<{ deleted: string }> {
   );
 }
 
-// ── Resume Upload ──
-
-export type ResumeUploadResult = {
-  ok: boolean;
-  events: number;
-  profile: Record<string, unknown>;
-  skills: Record<string, unknown>[];
-  experiences: Record<string, unknown>[];
-};
-
-export async function uploadResume(file: File): Promise<ResumeUploadResult> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("user_id", cachedUserId);
-  const res = await fetch("/api/memory/upload-resume", {
-    method: "POST",
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "上传失败" }));
-    throw new Error(err.detail || "上传失败");
-  }
-  return res.json();
-}
-
-// ── Structured Profile ──
-
-export type StructuredProfile = {
-  profile: Record<string, unknown>;
-  skills: Array<{
-    name: string;
-    level: string;
-    context?: string | null;
-    source?: string | null;
-  }>;
-  experiences: Array<{
-    title: string;
-    description: string;
-    period?: string | null;
-    tech_stack?: string | null;
-    role?: string | null;
-    source?: string | null;
-  }>;
-  goals: Record<string, string>;
-  preferences: Record<string, string>;
-  status: Record<string, string>;
-  decisions: Array<Record<string, unknown>>;
-};
-
-export function getStructuredProfile(): Promise<StructuredProfile> {
-  return http<StructuredProfile>(
-    `/api/memory/profile-structured?user_id=${encodeURIComponent(cachedUserId)}`,
-  );
-}
-
-export type ProfileUpdatePayload = {
-  profile?: Record<string, unknown>;
-  skills?: Array<Record<string, unknown>>;
-  experiences?: Array<Record<string, unknown>>;
-};
-
-export async function updateStructuredProfile(
-  payload: ProfileUpdatePayload,
-): Promise<{ updated: number; message: string }> {
-  return http<{ updated: number; message: string }>(
-    `/api/memory/profile-update?user_id=${encodeURIComponent(cachedUserId)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
-}
-
 // ── AI Understanding ──
 
 export type AboutYouResponse = {
@@ -129,6 +55,13 @@ export type AboutYouResponse = {
     evidence_count: number;
     first_seen: string;
     updated_at: string;
+  }>;
+  intents: Array<{
+    text: string;
+    category: string;
+    first_mentioned_at: string;
+    last_mentioned_at: string;
+    mention_count: number;
   }>;
   now_status: Record<string, string>;
   journey: Array<{
@@ -159,6 +92,24 @@ export function correctAIUnderstanding(text: string): Promise<{ message: string;
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
+    },
+  );
+}
+
+// ── 主动告诉 AI ──
+
+export type TellType = "interest" | "value" | "relationship" | "moment" | "reflection";
+
+export function tellAI(
+  eventType: TellType,
+  content: string,
+): Promise<{ message: string; event_id?: string }> {
+  return http<{ message: string; event_id?: string }>(
+    `/api/memory/tell?user_id=${encodeURIComponent(cachedUserId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_type: eventType, content }),
     },
   );
 }

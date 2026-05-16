@@ -11,10 +11,7 @@ from pydantic import ValidationError
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.profile.schemas import (
     DecisionPayload,
-    ExperiencePayload,
     KeyValuePayload,
-    ProfilePayload,
-    SkillPayload,
 )
 
 
@@ -39,19 +36,10 @@ def load_payload(event: GrowthEvent) -> dict:
 
 
 def extract_profile_fields(md_text: str) -> dict:
+    """从 AI 伴侣 memory.md 里提取结构化字段。"""
     patterns = {
-        "school_name": r"- 学校：(.+)",
-        "major": r"- 专业：(.+)",
-        "grade": r"- 年级：(.+)",
-        "graduation_year": r"- 毕业年份：(.+)",
-        "school_level": r"- 学校层次：(.+)",
-        "target_direction": r"- 目标岗位：(.+)",
-        "target_company_level": r"- 目标公司类型：(.+)",
-        "city": r"- 意向城市：(.+)",
-        "gpa": r"- GPA：(.+)",
-        "ranking": r"- 排名：(.+)",
-        "english_level": r"## 英语水平\s*\n- (.+)",
-        "expected_salary": r"## 期望薪资\s*\n- (.+)",
+        "name": r"- 名字[/／]昵称：(.+)",
+        "bio": r"- 简介：(.+)",
     }
     fields: dict = {}
     for key, pattern in patterns.items():
@@ -60,87 +48,45 @@ def extract_profile_fields(md_text: str) -> dict:
             val = m.group(1).strip()
             if val and val != "（待填写）":
                 fields[key] = val
-
-    m = re.search(r"## 个人简介\s*\n(.+?)(?=\n##|\n---|\Z)", md_text, re.DOTALL)
-    if m:
-        val = m.group(1).strip()
-        if val and val != "（待填写）":
-            fields["bio"] = val
-
     return fields
 
 
 def merge_profile_events(events: list[GrowthEvent]) -> dict:
+    """合并 profile_updated 事件为画像字典。"""
     profile: dict = {}
     for event in events:
         payload = load_payload(event)
         if not payload:
             continue
-
-        if isinstance(payload.get("memory_md"), str):
-            profile = deep_merge(profile, extract_profile_fields(payload["memory_md"]))
-            continue
-
-        if payload.get("field") in {"resume", "memory_md"} and isinstance(payload.get("content"), str):
-            profile = deep_merge(profile, extract_profile_fields(payload["content"]))
-            continue
-
-        try:
-            validated = ProfilePayload.model_validate(payload).model_dump(exclude_none=True)
-        except ValidationError:
-            continue
-        profile = deep_merge(profile, validated)
-
+        # 新格式：{"key": xxx, "value": xxx} 或直接 {"name": xxx, "bio": xxx}
+        if "key" in payload and "value" in payload:
+            profile[payload["key"]] = payload["value"]
+        else:
+            profile = deep_merge(profile, payload)
     return profile
 
 
-def merge_skill_events(events: list[GrowthEvent]) -> dict[str, dict]:
-    skills: dict[str, dict] = {}
+def merge_narrative_events(events: list[GrowthEvent]) -> list[dict]:
+    """合并叙事类事件（significant_moment, reflection_added 等）为列表。"""
+    result: list[dict] = []
+    seen: set[str] = set()
     for event in events:
         payload = load_payload(event)
         if not payload:
             continue
-        try:
-            validated = SkillPayload.model_validate(payload)
-        except ValidationError:
+        # 去重 key：title 或 key 字段
+        dedup_key = payload.get("title") or payload.get("key") or ""
+        if dedup_key and dedup_key in seen:
             continue
-        skills[validated.name] = {
-            "name": validated.name,
-            "level": validated.level,
-            "context": validated.context,
-            "source": validated.source,
-            "updated_at": event.created_at.isoformat() if event.created_at else None,
-        }
-    return skills
-
-
-def merge_experience_events(events: list[GrowthEvent]) -> list[dict]:
-    experiences: list[dict] = []
-    seen_keys: set[tuple[str, str]] = set()  # (title, period) 组合去重
-    for event in events:
-        payload = load_payload(event)
-        if not payload:
-            continue
-        try:
-            validated = ExperiencePayload.model_validate(payload)
-        except ValidationError:
-            continue
-        dedup_key = (validated.title, validated.period or "")
-        if dedup_key in seen_keys:
-            continue
-        seen_keys.add(dedup_key)
-        experiences.append(
+        if dedup_key:
+            seen.add(dedup_key)
+        result.append(
             {
-                "title": validated.title,
-                "description": validated.description,
-                "period": validated.period,
-                "tech_stack": validated.tech_stack,
-                "role": validated.role,
-                "source": validated.source,
+                **payload,
                 "created_at": event.created_at.isoformat() if event.created_at else None,
             }
         )
-    return experiences
+    return result
 
 
 def merge_dict_events(events: list[GrowthEvent]) -> dict:
@@ -179,129 +125,101 @@ def merge_decision_events(events: list[GrowthEvent]) -> list[dict]:
 
 def generate_memory_md(
     profile: dict,
+    interests: dict,
+    values: dict,
     preferences: dict,
-    status: dict,
-    goals: dict,
+    emotions: dict,
+    moments: list[dict],
     decisions: list[dict],
+    reflections: list[dict],
+    relationships: dict,
 ) -> str:
+    """生成 AI 伴侣画像 memory.md。"""
     date_str = datetime.now().strftime("%Y-%m-%d")
-    parts = ["# 用户核心记忆", ""]
-    parts.append("> 这个文件由 AI 自动管理，记录用户的核心信息。")
-    parts.append("> 每次对话开始时会自动注入到 system prompt。")
+    parts = ["# 关于你", ""]
+    parts.append("> 由 Lumen 自动更新，记录 AI 对你的理解。")
     parts.append("")
 
-    parts.append("## 基础信息")
-    parts.append(f"- 学校：{profile.get('school_name', '（待填写）')}")
-    parts.append(f"- 专业：{profile.get('major', '（待填写）')}")
-    parts.append(f"- 年级：{profile.get('grade', '（待填写）')}")
-    parts.append(f"- 毕业年份：{profile.get('graduation_year', '（待填写）')}")
-    if profile.get("school_level"):
-        parts.append(f"- 学校层次：{profile['school_level']}")
-    parts.append("")
-
-    parts.append("## 目标方向")
-    parts.append(f"- 目标岗位：{profile.get('target_direction', '（待填写）')}")
-    parts.append(f"- 目标公司类型：{profile.get('target_company_level', '（待填写）')}")
-    parts.append(f"- 意向城市：{profile.get('city', '（待填写）')}")
-    if goals:
-        parts.append("- 已记录的目标：")
-        for goal_name, goal_detail in goals.items():
-            parts.append(f"  - **{goal_name}**：{goal_detail}")
-    parts.append("")
-
-    if profile.get("gpa") or profile.get("ranking") or profile.get("awards") is not None:
-        parts.append("## 教育背景")
-        if profile.get("gpa"):
-            parts.append(f"- GPA：{profile['gpa']}")
-        if profile.get("ranking"):
-            parts.append(f"- 排名：{profile['ranking']}")
-        if profile.get("awards"):
-            parts.append("- 获奖：")
-            for award in profile["awards"]:
-                parts.append(f"  - {award}")
+    # 基础信息
+    if profile:
+        parts.append("## 你是谁")
+        for k, v in profile.items():
+            parts.append(f"- {k}：{v}")
         parts.append("")
 
-    parts.append("## 当前状态")
-    if status:
-        for key, value in status.items():
-            parts.append(f"- {key}：{value}")
-    else:
-        parts.append("- 正在学习：（待填写）")
-        parts.append("- 正在准备：（待填写）")
-        parts.append("- 焦虑程度：（待填写）")
-    parts.append("")
+    # 性格与兴趣
+    if interests:
+        parts.append("## 你真正在意的事")
+        for k, v in interests.items():
+            parts.append(f"- **{k}**：{v}")
+        parts.append("")
 
-    if profile.get("bio"):
-        parts.append("## 个人简介")
-        parts.append(str(profile["bio"]))
+    # 价值观
+    if values:
+        parts.append("## 你的价值观")
+        for k, v in values.items():
+            parts.append(f"- {k}：{v}")
         parts.append("")
-    if profile.get("english_level"):
-        parts.append("## 英语水平")
-        parts.append(f"- {profile['english_level']}")
+
+    # 情绪规律
+    if emotions:
+        parts.append("## 情绪规律")
+        for k, v in emotions.items():
+            parts.append(f"- {k}：{v}")
         parts.append("")
-    if profile.get("expected_salary"):
-        parts.append("## 期望薪资")
-        parts.append(f"- {profile['expected_salary']}")
-        parts.append("")
+
+    # 偏好
     if preferences:
-        parts.append("## 关键偏好")
-        for key, value in preferences.items():
-            parts.append(f"- {key}：{value}")
+        parts.append("## 偏好")
+        for k, v in preferences.items():
+            parts.append(f"- {k}：{v}")
         parts.append("")
+
+    # 重要经历
+    if moments:
+        parts.append("## 重要经历")
+        for m in moments[-5:]:
+            title = m.get("title") or m.get("key") or "未命名"
+            desc = m.get("description") or m.get("value") or ""
+            parts.append(f"- **{title}**：{desc[:100]}")
+        parts.append("")
+
+    # 重要关系
+    if relationships:
+        parts.append("## 重要的人")
+        for person, desc in relationships.items():
+            parts.append(f"- **{person}**：{desc}")
+        parts.append("")
+
+    # 重要决策
     if decisions:
         parts.append("## 重要决策")
-        for decision in decisions[-5:]:
-            title = decision.get("title", "未命名决策")
-            decision_text = decision.get("decision", "")
-            parts.append(f"- **{title}**：{decision_text}")
+        for d in decisions[-5:]:
+            title = d.get("title", "未命名决策")
+            content = d.get("content") or d.get("decision") or ""
+            parts.append(f"- **{title}**：{content[:100]}")
         parts.append("")
 
-    parts.append(f"---\n*最后更新：{date_str}*")
+    # 洞察与反思
+    if reflections:
+        parts.append("## 你说过的关键话")
+        for r in reflections[-3:]:
+            insight = r.get("insight") or r.get("value") or r.get("description") or ""
+            parts.append(f"> {insight[:150]}")
+        parts.append("")
+
+    parts.append("---\n*Lumen 越了解你，回应越贴近你这个人*")
+    parts.append(f"*最后更新：{date_str}*")
     return "\n".join(parts)
 
 
-def _build_skills_section(skills: dict[str, dict]) -> str:
-    """构建技能章节（合并到 memory.md）。"""
-    if not skills:
-        return ""
-    lines = ["## 技能"]
-    for skill_name, skill_info in skills.items():
-        level = skill_info.get("level", "familiar")
-        lines.append(f"- **{skill_name}**（{level}）")
-        if skill_info.get("context"):
-            lines.append(f"  - {skill_info['context'][:80]}")
-    return "\n".join(lines)
-
-
-def _build_experiences_section(experiences: list[dict]) -> str:
-    """构建经历章节（合并到 memory.md），最多 5 条。"""
-    if not experiences:
-        return ""
-    lines = ["## 经历"]
-    for exp in experiences[:5]:
-        title = exp.get("title") or exp.get("name") or exp.get("company") or "未命名经历"
-        lines.append(f"- **{title}**")
-        if exp.get("period"):
-            lines.append(f"  - {exp['period']}")
-        if exp.get("role"):
-            lines.append(f"  - {exp['role']}")
-        if exp.get("tech_stack"):
-            lines.append(f"  - {exp['tech_stack']}")
-        if exp.get("description"):
-            lines.append(f"  - {exp['description'][:60]}")
-    return "\n".join(lines)
-
-
 __all__ = [
-    "_build_experiences_section",
-    "_build_skills_section",
     "deep_merge",
     "extract_profile_fields",
     "generate_memory_md",
     "load_payload",
     "merge_decision_events",
     "merge_dict_events",
-    "merge_experience_events",
+    "merge_narrative_events",
     "merge_profile_events",
-    "merge_skill_events",
 ]

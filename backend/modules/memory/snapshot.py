@@ -89,23 +89,6 @@ async def invalidate_cache(user_id: str) -> None:
         _static_cache.pop(user_id, None)
 
 
-async def get_context_conv_ids(user_id: str) -> set[str] | None:
-    """返回缓存中的上下文对话 ID 集合。
-
-    缓存缺失或过期时返回 None（调用方应视为"未知"，不做去重过滤，
-    避免过期缓存导致过滤失效）。
-    """
-    async with _cache_lock:
-        entry = _static_cache.get(user_id)
-        if entry is None:
-            return None
-        if (datetime.now(UTC) - entry.created_at) >= timedelta(minutes=_CACHE_TTL_MINUTES):
-            _static_cache.pop(user_id, None)
-            return None
-        entry.last_accessed = datetime.now(UTC)  # LRU touch
-        return entry.context_conv_ids
-
-
 # ── L0: 固定块（数据源 = about_you.md）───────────────────────────
 
 

@@ -8,6 +8,42 @@
 
 ## 一、高优先级修补（建议一个月内完成）
 
+### 0. 画像字段体系与 AI 伴侣定位脱节 ⚠️
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | `ProfilePayload` 和 Agent 的 `update_profile` 工具仍在使用旧版求职字段集（`school_name`、`gpa`、`target_direction`、`expected_salary`...）。Agent 在对话中向用户询问"你学校是什么"、"期望薪资多少"，与"AI 伴侣"产品定位产生严重角色认知偏差 |
+| **影响** | 每次 Agent 调用画像更新工具，都在强化"职业规划助手"而非"越聊越懂你的 AI 伴侣"的角色形象 |
+| **修复文件** | `backend/modules/profile/schemas.py`（`ProfilePayload`）、`backend/modules/agent/tools/builtin/profile.py`（`handle_update_profile`）、`backend/modules/agent/pydantic_agent.py`（系统提示词中的画像字段引用） |
+| **工作量** | 半天 |
+| **实现思路** | 将 `ProfilePayload` 迁移到通用伴侣画像维度：`personality`（性格倾向）、`communication_style`（沟通风格）、`attachment_pattern`（依恋模式）、`stress_response`（压力反应）等。同步修改 Agent 工具的字段列表和提示词文案 |
+
+---
+
+### 0b. 模式洞察（patterns）核心功能空缺 ⚠️
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | `understanding.py` 第 209 行 `patterns: [],  # 模式洞察待实现`。Profile 页面的"AI 注意到的"区块永远是空的 |
+| **影响** | "越聊越懂你"最直观的体现缺失。用户看不到 AI 从对话中提炼出的模式（如"你每次做决定前都会焦虑 2-3 天"），画像只是事件罗列 |
+| **修复文件** | `backend/modules/memory/understanding.py`（`_generate_understanding` LLM 调用）、`backend/modules/profile/models.py`（`profile_data` JSON 结构） |
+| **工作量** | 1 天 |
+| **实现思路** | 在 `update_ai_understanding()` 的 LLM prompt 中要求 AI 同时生成 3-5 条模式洞察，每条包含 `insight`、`category`、`evidence_count`。将 patterns 持久化到 `UserProfile.profile_data["patterns"]` |
+
+---
+
+### 0c. Profile 页面失去主动塑造画像能力 ⚠️
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | Workstream C 删除简历编辑后，`src/pages/Profile.tsx` 变成了纯只读展示。用户无法主动告诉 AI"我是谁" |
+| **影响** | 新用户冷启动困难——聊得少时 AI 完全不了解他；老用户想修正理解时只能等 AI 主动发现 |
+| **修复文件** | `src/pages/Profile.tsx`、`src/lib/api/memory.ts`、`backend/modules/memory/router.py` |
+| **工作量** | 1-2 天 |
+| **实现思路** | 在 Profile 页面增加轻量化的"告诉 AI"入口：兴趣、价值观、重要的人。用户输入后，前端直接调用 `/api/memory/profile-update`（或新建 `/api/memory/tell`）写入对应 event type（`interest_observed`、`value_surfaced`、`relationship_noted`），不走旧版的结构化 CRUD |
+
+---
+
 ### 1. search_all 三路搜索串行 → 并行化
 
 | 属性 | 说明 |
@@ -144,6 +180,39 @@ async def _start_compensation_loop():
         await memory._compensation_sync("demo_user")
 ```
 
+### 6. AGENTS.md 文档与代码不同步
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | `AGENTS.md` 中仍记载 `/api/memory/profile-structured`、`/api/memory/profile-update`、`/api/memory/upload-resume` 等端点，但这些端点已在 Workstream C 中被删除 |
+| **影响** | 新加入的开发者（或 Agent）会按错误文档调用不存在的 API |
+| **修复文件** | `AGENTS.md` |
+| **工作量** | 30 分钟 |
+| **实现思路** | 删除已移除端点的 API 说明；更新"涉及文件"列表；确认前端调用链路无残留 |
+
+---
+
+### 7. Journey 与"此刻"数据重叠
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | `_get_journey()` 查询"除 `profile_updated` 外的所有事件"，而 `_get_current_status()` 查询 `emotional_pattern` + `value_surfaced`。两者数据范围重叠——`emotional_pattern`/`value_surfaced` 既出现在"此刻"又出现在"你走过的路" |
+| **影响** | Journey 时间线和"此刻"状态显示重复信息，用户困惑 |
+| **修复文件** | `backend/modules/memory/understanding.py` |
+| **工作量** | 1 小时 |
+| **实现思路** | `_get_journey()` 改为仅查询 Narrative 管线事件（`significant_moment`、`decision_made`、`reflection_added`、`contradiction_noted`、`relationship_noted`），排除 Profile 管线事件 |
+
+---
+
+### 8. 前端缺少 searchMemory / rebuildMemory API 封装
+
+| 属性 | 说明 |
+|------|------|
+| **问题** | `memory/router.py` 中有 `/search` 和 `/rebuild` 端点，但 `src/lib/api/memory.ts` 没有对应的 `searchMemory()` 和 `rebuildMemory()` 函数 |
+| **影响** | 前端无法调用这两个后端能力（搜索记忆、重建画像） |
+| **修复文件** | `src/lib/api/memory.ts`、`src/lib/api.ts` |
+| **工作量** | 30 分钟 |
+
 ---
 
 ## 二、中优先级优化（建议三个月内完成）
@@ -247,6 +316,8 @@ async def _start_compensation_loop():
 
 | 周 | 任务 | 优先级 | 工作量 | 原因 |
 |----|------|--------|--------|------|
+| W1 | **画像字段 AI 伴侣化** | P0 | 0.5d | 地基问题。Agent 每次更新画像都在问 GPA 和目标公司，所有其他工作都会被这个错误信号拉偏 |
+| W1 | **模式洞察实现** | P0 | 1d | "越聊越懂你"最直观的体现。与字段改造并行（一个改写入侧，一个改消费侧） |
 | W1 | **并行搜索** | P0 | 1h | 搜索延迟直接影响对话体验，改动极小 |
 | W1 | **Provider 健康检测** | P0 | 2h | 诊断能力，改完马上能知道 LanceDB 是否健康 |
 | W1-W2 | **LanceDB 分块改进** | P0 | 4h | 语义搜索质量提升，用户感知明显 |

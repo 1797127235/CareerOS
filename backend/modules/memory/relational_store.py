@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,23 +49,9 @@ class BaseRepository(Generic[T]):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create(self, **kwargs: Any) -> T:
-        instance = self.model(**kwargs)
-        self.db.add(instance)
-        await self.db.flush()
-        return instance
-
     async def get_by_id(self, id: int) -> T | None:
         result = await self.db.execute(select(self.model).where(self.model.id == id))  # type: ignore[attr-defined]
         return result.scalar_one_or_none()
-
-    async def list_by_user(self, user_id: str, **filters: Any) -> list[T]:
-        stmt = select(self.model).where(self.model.user_id == user_id)  # type: ignore[attr-defined]
-        for key, value in filters.items():
-            if value is not None:
-                stmt = stmt.where(getattr(self.model, key) == value)
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())
 
     async def delete(self, id: int) -> bool:
         instance = await self.get_by_id(id)
@@ -90,7 +76,11 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         payload_hash = _make_payload_hash(payload)
         dedupe_key = _make_dedupe_key(user_id, event_type, entity_type, entity_id, payload_hash)
 
-        existing = await self.db.execute(select(GrowthEvent.id).where(GrowthEvent.dedupe_key == dedupe_key))
+        existing = await self.db.execute(
+            select(GrowthEvent.id).where(
+                (GrowthEvent.dedupe_key == dedupe_key) | (GrowthEvent.original_dedupe_key == dedupe_key)
+            )
+        )
         if existing.scalar_one_or_none() is not None:
             logger.debug("Skipped duplicate event", user_id=user_id, dedupe_key=dedupe_key)
             return None
@@ -130,12 +120,6 @@ class GrowthEventRepository(BaseRepository[GrowthEvent]):
         if user_id:
             stmt = stmt.where(GrowthEvent.user_id == user_id)
         result = await self.db.execute(stmt)
-        return list(result.scalars().all())
-
-    async def get_all_by_user(self, user_id: str) -> list[GrowthEvent]:
-        result = await self.db.execute(
-            select(GrowthEvent).where(GrowthEvent.user_id == user_id).order_by(GrowthEvent.created_at.desc())
-        )
         return list(result.scalars().all())
 
     async def get_needing_projection(

@@ -5,19 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.core.logging import get_logger
-from backend.modules.profile.resume_service import (
-    upload_resume as _upload_resume,
-)
-from backend.modules.profile.service import (
-    get_profile_structured as _get_profile_structured,
-)
-from backend.modules.profile.service import (
-    update_profile_structured as _update_profile_structured,
-)
 
 logger = get_logger(__name__)
 
@@ -59,12 +50,12 @@ class MemoryItemOut(BaseModel):
     categories: list[str] = Field(default_factory=list)
 
 
-class ResumeUploadResponse(BaseModel):
-    ok: bool
-    events: int
-    profile: dict[str, Any] = Field(default_factory=dict)
-    skills: list[dict[str, Any]] = Field(default_factory=list)
-    experiences: list[dict[str, Any]] = Field(default_factory=list)
+class AboutYouResponse(BaseModel):
+    about_you: str = ""
+    updated_at: str = ""
+    patterns: list[dict[str, Any]] = Field(default_factory=list)
+    now_status: dict[str, str] = Field(default_factory=dict)
+    journey: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @router.get("/me", response_model=MemoryContent)
@@ -168,148 +159,6 @@ async def delete_memory(event_id: str, user_id: str = Query("demo_user")) -> dic
         raise HTTPException(status_code=500, detail="删除失败")
 
 
-@router.post("/upload-resume", response_model=ResumeUploadResponse)
-async def upload_resume(
-    file: UploadFile = File(...),
-    user_id: str = Form("demo_user"),
-) -> ResumeUploadResponse:
-    _validate_user_id(user_id)
-
-    try:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="上传文件为空")
-    except Exception as exc:
-        logger.error("Resume read failed: %s", exc)
-        raise HTTPException(status_code=400, detail="文件读取失败") from exc
-
-    try:
-        result = await _upload_resume(content=content, filename=file.filename or "resume.pdf", user_id=user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error("Resume upload failed: %s", exc)
-        raise HTTPException(status_code=500, detail="简历解析失败") from exc
-
-    return ResumeUploadResponse(
-        ok=True,
-        events=result["events_count"],
-        profile=result["profile"],
-        skills=result["skills"],
-        experiences=result["experiences"],
-    )
-
-
-class SkillItemOut(BaseModel):
-    name: str
-    level: str
-    context: str | None = None
-    source: str | None = None
-
-
-class ExperienceItemOut(BaseModel):
-    title: str
-    description: str
-    period: str | None = None
-    tech_stack: str | None = None
-    role: str | None = None
-    source: str | None = None
-
-
-class ProfileStructuredResponse(BaseModel):
-    profile: dict[str, Any] = Field(default_factory=dict)
-    skills: list[SkillItemOut] = Field(default_factory=list)
-    experiences: list[ExperienceItemOut] = Field(default_factory=list)
-    goals: dict[str, str] = Field(default_factory=dict)
-    preferences: dict[str, str] = Field(default_factory=dict)
-    status: dict[str, str] = Field(default_factory=dict)
-    decisions: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class AboutYouResponse(BaseModel):
-    about_you: str = ""
-    updated_at: str = ""
-    patterns: list[dict[str, Any]] = Field(default_factory=list)
-    now_status: dict[str, str] = Field(default_factory=dict)
-    journey: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class ProfileUpdateRequest(BaseModel):
-    """前端提交的画像更新请求 — 传什么字段就更新什么。"""
-
-    profile: dict[str, Any] | None = None
-    skills: list[dict[str, Any]] | None = None
-    experiences: list[dict[str, Any]] | None = None
-
-
-@router.get("/profile-structured", response_model=ProfileStructuredResponse)
-async def get_profile_structured(user_id: str = Query("demo_user")) -> ProfileStructuredResponse:
-    """读取用户画像的结构化数据（从 GrowthEvent 合并，不是解析 markdown）。"""
-    _validate_user_id(user_id)
-
-    try:
-        data = await _get_profile_structured(user_id)
-    except Exception as exc:
-        logger.error("Profile structured read failed: %s", exc)
-        raise HTTPException(status_code=500, detail="读取画像失败") from exc
-
-    skills_out = [
-        SkillItemOut(
-            name=s["name"],
-            level=s.get("level", "familiar"),
-            context=s.get("context"),
-            source=s.get("source"),
-        )
-        for s in data["skills"]
-    ]
-
-    experiences_out = [
-        ExperienceItemOut(
-            title=e["title"],
-            description=e.get("description", ""),
-            period=e.get("period"),
-            tech_stack=e.get("tech_stack"),
-            role=e.get("role"),
-            source=e.get("source"),
-        )
-        for e in data["experiences"]
-    ]
-
-    return ProfileStructuredResponse(
-        profile=data["profile"],
-        skills=skills_out,
-        experiences=experiences_out,
-        goals=data["goals"],
-        preferences=data["preferences"],
-        status=data["status"],
-        decisions=data["decisions"],
-    )
-
-
-@router.post("/profile-update")
-async def update_profile_structured(
-    req: ProfileUpdateRequest,
-    user_id: str = Query("demo_user"),
-) -> dict:
-    """前端手动编辑画像后批量提交 — 生成对应 GrowthEvent。"""
-    _validate_user_id(user_id)
-
-    try:
-        count = await _update_profile_structured(
-            user_id=user_id,
-            profile=req.profile,
-            skills=req.skills,
-            experiences=req.experiences,
-        )
-    except Exception as exc:
-        logger.error("Profile structured update failed: %s", exc)
-        raise HTTPException(status_code=500, detail="更新失败，请查看日志") from exc
-
-    if count == 0:
-        return {"updated": 0, "message": "没有需要更新的内容"}
-    return {"updated": count, "message": f"已更新 {count} 条记录"}
-
-
 @router.get("/understanding", response_model=AboutYouResponse)
 async def get_ai_understanding(user_id: str = Query("demo_user")) -> AboutYouResponse:
     """获取 AI 综合画像（关于你 + 模式洞察 + 此刻状态 + 时间线）。"""
@@ -361,3 +210,47 @@ async def correct_ai_understanding(
 
     await _update_profile_data(user_id, corrected_text)
     return {"message": "已更新", "chars": len(corrected_text)}
+
+
+@router.post("/tell")
+async def tell_ai(
+    body: dict[str, str],
+    user_id: str = Query("demo_user"),
+) -> dict:
+    """用户主动告诉 AI 关于自己的信息，直接写入对应事件类型。"""
+    _validate_user_id(user_id)
+    event_type = body.get("event_type", "")
+    content = body.get("content", "")
+
+    if not event_type or not content:
+        raise HTTPException(status_code=400, detail="event_type 和 content 不能为空")
+
+    valid_types = {
+        "interest": "interest_observed",
+        "value": "value_surfaced",
+        "relationship": "relationship_noted",
+        "moment": "significant_moment",
+        "reflection": "reflection_added",
+    }
+    if event_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的 event_type，支持: {', '.join(valid_types.keys())}",
+        )
+
+    try:
+        memory = _get_memory()
+        event = await memory.remember(
+            user_id=user_id,
+            event_type=valid_types[event_type],
+            entity_type=event_type,
+            entity_id=content[:32],
+            payload={"key": content[:32], "value": content, "source": "用户主动"},
+            source="用户主动",
+        )
+        if event and event.id:
+            return {"message": "已记录", "event_id": str(event.id)}
+        return {"message": "内容未变化，跳过"}
+    except Exception as exc:
+        logger.error("tell_ai failed: %s", exc)
+        raise HTTPException(status_code=500, detail="记录失败") from exc

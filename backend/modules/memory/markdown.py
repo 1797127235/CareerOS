@@ -16,15 +16,12 @@ from backend.core.config import USER_DATA_DIR
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
 from backend.modules.memory.events_merger import (
-    _build_experiences_section,
-    _build_skills_section,
     deep_merge,
     generate_memory_md,
     merge_decision_events,
     merge_dict_events,
-    merge_experience_events,
+    merge_narrative_events,
     merge_profile_events,
-    merge_skill_events,
 )
 from backend.modules.memory.models import GrowthEvent
 
@@ -53,32 +50,11 @@ def ensure_memory_dirs(user_id: str) -> None:
 
 
 def memory_default() -> str:
-    return """# 用户核心记忆
+    return """# 关于你
 
-> 这个文件由 AI 自动管理，记录用户的核心信息。
-> 每次对话开始时会自动注入到 system prompt。
+> 由 Lumen 自动更新，记录 AI 对你的理解。
 
-## 基础信息
-- 学校：（待填写）
-- 专业：（待填写）
-- 年级：（待填写）
-- 毕业年份：（待填写）
-
-## 目标方向
-- 目标岗位：（待填写）
-- 目标公司类型：（待填写）
-- 意向城市：（待填写）
-
-## 当前状态
-- 正在学习：（待填写）
-- 正在准备：（待填写）
-- 焦虑程度：（待填写）
-
-## 技能
-_暂无记录_
-
-## 经历
-_暂无记录_
+_还没有足够的记录。多和 Lumen 聊聊，它会逐渐了解你。_
 
 ---
 *最后更新：待填写*
@@ -90,11 +66,6 @@ def read_memory(user_id: str) -> str:
     if not memory_file.exists():
         return ""
     return memory_file.read_text(encoding="utf-8")
-
-
-def write_memory(user_id: str, content: str) -> None:
-    ensure_memory_dirs(user_id)
-    (memory_dir(user_id) / "memory.md").write_text(content, encoding="utf-8")
 
 
 def _truncate_to_limit(content: str, limit: int) -> str:
@@ -179,28 +150,30 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
             events_by_type[event.event_type].append(event)
 
         profile = merge_profile_events(events_by_type.get("profile_updated", []))
-        skills = merge_skill_events(
-            events_by_type.get("skill_added", []) + events_by_type.get("skill_level_changed", [])
-        )
-        experiences = merge_experience_events(events_by_type.get("experience_added", []))
+        interests = merge_dict_events(events_by_type.get("interest_observed", []))
+        values = merge_dict_events(events_by_type.get("value_surfaced", []))
         preferences = merge_dict_events(events_by_type.get("preference_learned", []))
-        status = merge_dict_events(events_by_type.get("status_changed", []))
-        goals = merge_dict_events(events_by_type.get("goal_updated", []))
+        emotions = merge_dict_events(events_by_type.get("emotional_pattern", []))
+        moments = merge_narrative_events(events_by_type.get("significant_moment", []))
         decisions = merge_decision_events(events_by_type.get("decision_made", []))
+        reflections = merge_narrative_events(events_by_type.get("reflection_added", []))
+        relationships = merge_dict_events(events_by_type.get("relationship_noted", []))
 
         ensure_memory_dirs(user_id)
         d = memory_dir(user_id)
 
-        # 构建各章节
-        core = generate_memory_md(profile, preferences, status, goals, decisions)
-        skills_section = _build_skills_section(skills)
-        exp_section = _build_experiences_section(experiences)
-
-        # 拼接为一个 memory.md
+        core = generate_memory_md(
+            profile,
+            interests,
+            values,
+            preferences,
+            emotions,
+            moments,
+            decisions,
+            reflections,
+            relationships,
+        )
         combined = core
-        for section in [skills_section, exp_section]:
-            if section:
-                combined += "\n\n" + section
 
         _write_md_file_safe(str(d / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
 
@@ -209,12 +182,14 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
             user_id,
             {
                 "profile": profile,
-                "skills": skills,
-                "experiences": experiences,
+                "interests": interests,
+                "values": values,
                 "preferences": preferences,
-                "status": status,
-                "goals": goals,
+                "emotions": emotions,
+                "moments": moments,
                 "decisions": decisions,
+                "reflections": reflections,
+                "relationships": relationships,
             },
         )
 
@@ -227,8 +202,6 @@ async def project_user_to_md(db: AsyncSession, user_id: str) -> bool:
             ".md projection complete",
             user_id=user_id,
             events=len(events),
-            skills=len(skills),
-            experiences=len(experiences),
         )
         return True
     except Exception as exc:
@@ -252,31 +225,37 @@ async def _incremental_update_md(db: AsyncSession, user_id: str, dirty_events: l
             dirty_by_type[event.event_type].append(event)
 
         profile_updates = merge_profile_events(dirty_by_type.get("profile_updated", []))
-        skills_updates = merge_skill_events(
-            dirty_by_type.get("skill_added", []) + dirty_by_type.get("skill_level_changed", [])
-        )
-        exp_updates = merge_experience_events(dirty_by_type.get("experience_added", []))
+        interests_updates = merge_dict_events(dirty_by_type.get("interest_observed", []))
+        values_updates = merge_dict_events(dirty_by_type.get("value_surfaced", []))
         pref_updates = merge_dict_events(dirty_by_type.get("preference_learned", []))
-        status_updates = merge_dict_events(dirty_by_type.get("status_changed", []))
-        goals_updates = merge_dict_events(dirty_by_type.get("goal_updated", []))
+        emotions_updates = merge_dict_events(dirty_by_type.get("emotional_pattern", []))
+        moments_updates = merge_narrative_events(dirty_by_type.get("significant_moment", []))
         decision_updates = merge_decision_events(dirty_by_type.get("decision_made", []))
+        reflections_updates = merge_narrative_events(dirty_by_type.get("reflection_added", []))
+        relationships_updates = merge_dict_events(dirty_by_type.get("relationship_noted", []))
 
         profile = deep_merge(cache.get("profile", {}), profile_updates)
-        skills = {**cache.get("skills", {}), **skills_updates}
-        experiences = cache.get("experiences", []) + exp_updates
+        interests = {**cache.get("interests", {}), **interests_updates}
+        values = {**cache.get("values", {}), **values_updates}
         preferences = {**cache.get("preferences", {}), **pref_updates}
-        status = {**cache.get("status", {}), **status_updates}
-        goals = {**cache.get("goals", {}), **goals_updates}
+        emotions = {**cache.get("emotions", {}), **emotions_updates}
+        moments = cache.get("moments", []) + moments_updates
         decisions = cache.get("decisions", []) + decision_updates
+        reflections = cache.get("reflections", []) + reflections_updates
+        relationships = {**cache.get("relationships", {}), **relationships_updates}
 
-        core = generate_memory_md(profile, preferences, status, goals, decisions)
-        skills_section = _build_skills_section(skills)
-        exp_section = _build_experiences_section(experiences)
-
+        core = generate_memory_md(
+            profile,
+            interests,
+            values,
+            preferences,
+            emotions,
+            moments,
+            decisions,
+            reflections,
+            relationships,
+        )
         combined = core
-        for section in [skills_section, exp_section]:
-            if section:
-                combined += "\n\n" + section
 
         _write_md_file_safe(str(memory_dir(user_id) / "memory.md"), combined, max_chars=COMBINED_TOTAL_LIMIT)
 
@@ -284,12 +263,14 @@ async def _incremental_update_md(db: AsyncSession, user_id: str, dirty_events: l
             user_id,
             {
                 "profile": profile,
-                "skills": skills,
-                "experiences": experiences,
+                "interests": interests,
+                "values": values,
                 "preferences": preferences,
-                "status": status,
-                "goals": goals,
+                "emotions": emotions,
+                "moments": moments,
                 "decisions": decisions,
+                "reflections": reflections,
+                "relationships": relationships,
             },
         )
 
@@ -302,8 +283,6 @@ async def _incremental_update_md(db: AsyncSession, user_id: str, dirty_events: l
             ".md projection incremental update complete",
             user_id=user_id,
             dirty_events=len(dirty_events),
-            skills=len(skills),
-            experiences=len(experiences),
         )
         return True
     except Exception as exc:

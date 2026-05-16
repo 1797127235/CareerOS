@@ -136,7 +136,7 @@ def create_agent() -> Agent[LumenDeps, str]:
             ctx.deps.build_context_cache = context
             return context
 
-        return "【用户画像为空】用户尚未填写个人信息。当用户提供信息时，调用 memory_save 或 update_profile 保存。"
+        return "【用户画像为空】用户尚未提供个人信息。当用户提供信息时，调用 memory_save 或 update_profile 保存。"
 
     return agent
 

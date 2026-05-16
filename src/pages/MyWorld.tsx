@@ -49,7 +49,7 @@ function getFolderPath(ds: DataSource): string {
   return "";
 }
 
-export default function KnowledgeBase() {
+export default function MyWorld() {
   const [sources, setSources] = useState<DataSource[]>([]);
   const [filtered, setFiltered] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,7 +124,7 @@ export default function KnowledgeBase() {
     <div className="w-full max-w-[42rem] mx-auto px-md py-xl ink-fade-in">
       {/* 标题 */}
       <div className="mb-lg">
-        <h1 className="text-xl font-han text-ink mb-2xs">知识库</h1>
+        <h1 className="text-xl font-han text-ink mb-2xs">我的世界</h1>
         <p className="text-sm text-text-muted">
           Lumen 已阅读的资料，在对话中会自动引用
         </p>
@@ -198,7 +198,7 @@ export default function KnowledgeBase() {
           <p className="text-sm text-text-muted max-w-[22rem] mb-md leading-relaxed">
             {search.trim()
               ? "试试其他关键词"
-              : "前往「设置 → 知识库」添加本地文件夹，Lumen 会自动阅读其中的内容"}
+              : "前往「设置 → 我的世界」添加本地文件夹，Lumen 会自动阅读其中的内容"}
           </p>
         </div>
       )}

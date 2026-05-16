@@ -47,12 +47,5 @@ app.include_router(data_sources_router, prefix="/api")
 # ── 静态文件托管：dist/ 存在时始终挂载 ──
 static_dir = Path(__file__).parent.parent / "dist"
 if static_dir.exists():
-
-    @app.get("/api/{path:path}")
-    async def api_not_found(path: str):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse({"detail": "Not Found"}, status_code=404)
-
     app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

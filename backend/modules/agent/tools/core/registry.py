@@ -64,9 +64,8 @@ class ToolRegistry:
         """列出所有 toolset 名称。"""
         return list(self._toolsets.keys())
 
-    def resolve_toolset(self, name: str, *, include_nested: bool = True) -> set[str]:
-        """解析 toolset，返回包含的所有工具名（支持嵌套 includes）。"""
-        # 简单实现：不支持嵌套 includes（Phase 1 先保持简单）
+    def resolve_toolset(self, name: str) -> set[str]:
+        """解析 toolset，返回包含的所有工具名。"""
         return self.get_toolset(name)
 
     def get_tools_for_model(self, toolset_names: list[str] | None = None) -> dict[str, ToolDefinition]:

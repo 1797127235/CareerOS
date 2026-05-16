@@ -124,6 +124,9 @@ class Settings(BaseSettings):
 
     # ── 应用 ──
     debug: bool = True
+    # ── 语义去重 ──
+    semantic_dedup_enabled: bool = False
+    semantic_dedup_default_threshold: float = 0.85
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
 
     def __init__(self, **kwargs: Any) -> None:

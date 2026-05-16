@@ -115,7 +115,7 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
             description=(
                 "搜索记忆。"
                 "search_mode 选择："
-                '- "keyword"（默认）— 关键词搜索，适用于「Python」「实习」等具体词；'
+                '- "keyword"（默认）— 关键词搜索，适用于「跑步」「旅行」等具体词；'
                 '- "grep" — 时间范围浏览，适用于「最近做了什么」「这周」等自然语言，'
                 "必须配合 time_filter 使用。"
                 "time_filter（仅 grep 模式生效）："
@@ -185,29 +185,12 @@ def create_tool_runtime() -> tuple[ToolRegistry, ToolDispatcher, ToolsetResolver
     registry.register(
         ToolDefinition(
             name="update_profile",
-            description=(
-                "更新用户画像。只传有值的字段。"
-                "可用字段: school_name, major, grade, graduation_year, school_level, "
-                "target_direction, target_company_level, city, gpa, ranking, awards, bio, "
-                "english_level, expected_salary"
-            ),
+            description=("更新用户基础名片。只传有值的字段。" "可用字段: nickname（昵称）, bio（一句话介绍自己）"),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "school_name": {"type": "string"},
-                    "major": {"type": "string"},
-                    "grade": {"type": "string"},
-                    "graduation_year": {"type": "string"},
-                    "school_level": {"type": "string"},
-                    "target_direction": {"type": "string"},
-                    "target_company_level": {"type": "string"},
-                    "city": {"type": "string"},
-                    "gpa": {"type": "string"},
-                    "ranking": {"type": "string"},
-                    "awards": {"type": "array", "items": {"type": "string"}},
-                    "bio": {"type": "string"},
-                    "english_level": {"type": "string"},
-                    "expected_salary": {"type": "string"},
+                    "nickname": {"type": "string", "description": "用户昵称"},
+                    "bio": {"type": "string", "description": "一句话介绍自己"},
                 },
             },
             category="builtin",

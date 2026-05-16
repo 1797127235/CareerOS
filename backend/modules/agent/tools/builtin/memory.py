@@ -37,13 +37,16 @@ async def handle_memory_search(args: dict[str, Any], ctx: ToolRuntimeContext) ->
 
 
 _EVENT_TYPE_MAP: dict[str, str] = {
-    "skills": "skill_added",
-    "experiences": "experience_added",
-    "preferences": "preference_learned",
-    "goals": "goal_updated",
-    "decisions": "decision_made",
-    "status": "status_changed",
-    "note": "note_added",
+    "interests": "interest_observed",  # 对什么真正着迷
+    "values": "value_surfaced",  # 在意什么、底线
+    "preferences": "preference_learned",  # 偏好
+    "emotions": "emotional_pattern",  # 情绪规律
+    "moments": "significant_moment",  # 有意义的经历
+    "decisions": "decision_made",  # 重要决策
+    "reflections": "reflection_added",  # 洞察与反思
+    "contradictions": "contradiction_noted",  # 说 X 做 Y
+    "relationships": "relationship_noted",  # 重要的人
+    "profile": "profile_updated",  # 基础信息
 }
 
 
@@ -57,23 +60,20 @@ async def handle_memory_save(args: dict[str, Any], ctx: ToolRuntimeContext) -> s
     if entity_type not in _EVENT_TYPE_MAP:
         return f"[工具错误/INVALID_ENTITY_TYPE] 未知的类型 {entity_type}。支持: {', '.join(_EVENT_TYPE_MAP.keys())}"
 
-    from backend.modules.profile.schemas import (
-        DecisionPayload,
-        ExperiencePayload,
-        KeyValuePayload,
-        SkillPayload,
-    )
+    # 所有新类型使用通用结构化 payload
+    payload: dict = {"key": section, "value": content, "source": "Agent工具"}
 
-    if entity_type == "skills":
-        payload = SkillPayload(name=section, level="familiar", context=content, source="Agent工具").model_dump()
-    elif entity_type == "experiences":
-        payload = ExperiencePayload(title=section, description=content, source="Agent工具").model_dump()
-    elif entity_type == "decisions":
-        payload = DecisionPayload(title=section, content=content).model_dump()
-    elif entity_type in ("preferences", "goals", "status", "note"):
-        payload = KeyValuePayload(key=section, value=content).model_dump()
-    else:
-        return f"[工具错误/UNSUPPORTED_TYPE] 不支持的类型 {entity_type}"
+    # decision_made 保留更语义化的结构
+    if entity_type == "decisions":
+        payload = {"title": section, "content": content}
+
+    # significant_moment 也用 title+description 结构
+    elif entity_type == "moments":
+        payload = {"title": section, "description": content}
+
+    # relationship_noted 用 person+description
+    elif entity_type == "relationships":
+        payload = {"person": section, "description": content}
 
     memory = get_memory()
     event = await memory.remember(
@@ -86,10 +86,9 @@ async def handle_memory_save(args: dict[str, Any], ctx: ToolRuntimeContext) -> s
         db=ctx.db,
     )
     if event and event.id is not None:
-        # 将 event_id 记录到 context 中，供后续使用
         pending = ctx.tool_state.setdefault("pending_event_ids", [])
         pending.append(str(event.id))
         ctx.tool_state["build_context_cache"] = ""
-        return f"已保存 {entity_type}/{section}"
+        return f"已记录 {entity_type}/{section}"
 
     return f"{entity_type}/{section} 内容未变化，跳过"

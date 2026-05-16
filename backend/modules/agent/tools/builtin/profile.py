@@ -25,7 +25,7 @@ async def handle_get_profile(args: dict[str, Any], ctx: ToolRuntimeContext) -> s
     if context.strip():
         return _strip_context_tags(context)
 
-    return "用户画像为空，请先上传简历或手动填写画像。"
+    return "用户画像还是空白，多和我聊聊，我会逐渐了解你。"
 
 
 # GetProfileArgs 仅用于类型标注，实际无需使用 typed 变量
@@ -38,22 +38,7 @@ async def handle_update_profile(args: dict[str, Any], ctx: ToolRuntimeContext) -
 
     typed: UpdateProfileArgs = args  # type: ignore[assignment]
     fields: dict[str, Any] = {}
-    for name in [
-        "school_name",
-        "major",
-        "grade",
-        "graduation_year",
-        "school_level",
-        "target_direction",
-        "target_company_level",
-        "city",
-        "gpa",
-        "ranking",
-        "awards",
-        "bio",
-        "english_level",
-        "expected_salary",
-    ]:
+    for name in ["nickname", "bio"]:
         val = typed.get(name)
         if val is not None:
             fields[name] = val

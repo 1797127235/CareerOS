@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
-from backend.modules.memory.classifier import NARRATIVE_EVENT_TYPES
+from backend.modules.memory.classifier import NARRATIVE_EVENT_TYPES, PROFILE_EVENT_TYPES
 from backend.modules.memory.models import GrowthEvent
 from backend.modules.memory.search import MemoryItem, search_all
 from backend.modules.memory.snapshot import build_snapshot
@@ -84,7 +84,7 @@ class MemorySearcher:
         """
         from sqlalchemy import select
 
-        _MERGE_TYPES = {"goal_updated", "preference_learned", "status_changed"}
+        _MERGE_TYPES = PROFILE_EVENT_TYPES - {"profile_updated", "emotional_pattern"}
 
         async with get_async_session_maker()() as db:
             result = await db.execute(
@@ -236,6 +236,33 @@ class MemorySearcher:
         all_parts = [p for p in [static_ctx, *dynamic_parts] if p]
         if conversation_summary:
             all_parts.append(f"【对话摘要】\n{conversation_summary}")
+
+        # B4: 意图追踪 —— 如果有待提醒的意图，注入系统提示
+        try:
+            from backend.modules.memory.understanding import _extract_intents
+
+            intents = await _extract_intents(user_id)
+            if intents:
+                pending = [
+                    i
+                    for i in intents
+                    if i.get("mention_count", 1) <= 2
+                    or (
+                        i.get("last_mentioned_at")
+                        and (
+                            datetime.now(UTC) - datetime.fromisoformat(i["last_mentioned_at"].replace("Z", "+00:00"))
+                        ).days
+                        > 14
+                    )
+                ]
+                if pending:
+                    lines = ["【待追踪意图】用户曾提到过这些想法，可能仍在心中："]
+                    for intent in pending[:3]:
+                        lines.append(f"- {intent['text']}")
+                    all_parts.append("\n".join(lines))
+        except Exception:
+            pass
+
         if not all_parts:
             return ""
 

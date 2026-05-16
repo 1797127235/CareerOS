@@ -41,17 +41,13 @@ export {
   getMemoryContent,
   getMemoryList,
   getMemoryStats,
-  getStructuredProfile,
   refreshAIUnderstanding,
   resetMemory,
-  updateStructuredProfile,
-  uploadResume,
+  tellAI,
 } from "./api/memory";
 export type {
   AboutYouResponse,
   MemoryItem,
   MemoryStats,
-  ProfileUpdatePayload,
-  ResumeUploadResult,
-  StructuredProfile,
+  TellType,
 } from "./api/memory";

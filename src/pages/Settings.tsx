@@ -20,7 +20,7 @@ import type {
   DataSource,
 } from "../lib/api";
 
-type TabKey = "ai" | "memory" | "knowledge" | "about";
+type TabKey = "ai" | "memory" | "world" | "about";
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   {
@@ -42,8 +42,8 @@ const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    key: "knowledge",
-    label: "知识库",
+    key: "world",
+    label: "我的世界",
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
@@ -66,34 +66,10 @@ interface SettingsProps {
   onClose: () => void;
 }
 
-function SectionHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-xs mb-md">
-      <span className="w-0.5 h-4 rounded-full bg-ink opacity-70 flex-shrink-0" />
-      <h2 className="text-sm font-medium text-text-muted tracking-wide uppercase">{children}</h2>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2xs">
-      <label className="block text-xs text-text-subtle">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-const inputCls =
-  "w-full px-sm py-[9px] border border-border rounded-lg text-sm bg-surface-elevated text-text outline-none focus:border-ink transition-colors duration-150 placeholder:text-text-subtle";
-
-const selectCls =
-  "w-full px-sm py-[9px] border border-border rounded-lg text-sm bg-surface-elevated text-text outline-none focus:border-ink transition-colors duration-150 cursor-pointer";
-
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("ai");
   const [config, setConfig] = useState<Config | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [llmProvider, setLlmProvider] = useState("dashscope");
@@ -641,8 +617,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               </div>
             )}
 
-            {/* ── 知识库 ── */}
-            {activeTab === "knowledge" && (
+            {/* ── 我的世界 ── */}
+            {activeTab === "world" && (
               <div className="space-y-lg">
                 {/* 连接概览 */}
                 <div className="grid grid-cols-2 gap-sm">

@@ -31,8 +31,6 @@ LOG_FILE = LOG_DIR / "lumen.log"
 # ── 上下文变量 ──────────────────────────────────────────────
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
-user_id_var: ContextVar[str] = ContextVar("user_id", default="")
-conversation_id_var: ContextVar[str] = ContextVar("conversation_id", default="")
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -155,21 +153,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             log.error("request_failed", error=str(exc))
             raise
-
-
-# ── 上下文绑定工具 ──────────────────────────────────────────
-
-
-def bind_user_context(user_id: str) -> None:
-    """绑定用户 ID 到当前上下文。"""
-    user_id_var.set(user_id)
-    bind_contextvars(user_id=user_id)
-
-
-def bind_conversation_context(conversation_id: str) -> None:
-    """绑定会话 ID 到当前上下文。"""
-    conversation_id_var.set(conversation_id)
-    bind_contextvars(conversation_id=conversation_id)
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

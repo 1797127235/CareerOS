@@ -94,50 +94,7 @@ class GetProfileArgs(TypedDict):
 
 
 class UpdateProfileArgs(TypedDict):
-    """update_profile 工具的输入参数。"""
+    """update_profile 工具的输入参数 — 只收集最基础的身份名片。"""
 
-    school_name: NotRequired[str]
-    major: NotRequired[str]
-    grade: NotRequired[str]
-    graduation_year: NotRequired[str]
-    school_level: NotRequired[str]
-    target_direction: NotRequired[str]
-    target_company_level: NotRequired[str]
-    city: NotRequired[str]
-    gpa: NotRequired[str]
-    ranking: NotRequired[str]
-    awards: NotRequired[list[str]]
+    nickname: NotRequired[str]
     bio: NotRequired[str]
-    english_level: NotRequired[str]
-    expected_salary: NotRequired[str]
-
-
-# ── 数据源读取工具 ──
-
-
-class DataSourceSearchArgs(TypedDict):
-    """data_source_search 工具的输入参数。"""
-
-    query: str
-    """搜索关键词。"""
-
-    limit: NotRequired[int]
-    """最多返回条数。"""
-
-
-class DataSourceListArgs(TypedDict):
-    """data_source_list 工具的输入参数（无参数）。"""
-
-
-class DataSourceGetItemArgs(TypedDict):
-    """data_source_get_item 工具的输入参数。"""
-
-    item_id: str
-    """文档 item_id。"""
-
-    max_chars: NotRequired[int]
-    """最大返回字符数（默认 4000）。"""
-
-
-class DataSourceStatusArgs(TypedDict):
-    """data_source_status 工具的输入参数（无参数）。"""

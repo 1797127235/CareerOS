@@ -74,11 +74,6 @@ _GROWTH_EVENTS_FTS_TRIGGER_NAMES = [
 ]
 
 
-def get_growth_events_fts_ddl() -> list[str]:
-    """返回 GrowthEvent FTS5 表和触发器的完整 DDL（幂等，含回填）。"""
-    return list(_GROWTH_EVENTS_FTS_DDL)
-
-
 async def rebuild_growth_events_fts(conn) -> None:
     """全量重建 GrowthEvent FTS5 索引（DROP + CREATE + 回填）。
 
@@ -217,6 +212,13 @@ async def migrate_sqlite(conn) -> None:
         )""",
         "CREATE INDEX IF NOT EXISTS ix_ingestion_state_ds ON ingestion_state (data_source_id)",
         "CREATE INDEX IF NOT EXISTS ix_ingestion_state_status ON ingestion_state (status)",
+        # ── Workstream B: 语义去重字段 ──
+        "ALTER TABLE growth_events ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'active'",
+        "ALTER TABLE growth_events ADD COLUMN updated_at DATETIME",
+        "ALTER TABLE growth_events ADD COLUMN merged_from TEXT",
+        "ALTER TABLE growth_events ADD COLUMN original_dedupe_key VARCHAR(128)",
+        "CREATE INDEX IF NOT EXISTS ix_growth_events_status ON growth_events (user_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_growth_events_original_dedupe ON growth_events (original_dedupe_key)",
     ]:
         try:
             await conn.execute(text(sql))
