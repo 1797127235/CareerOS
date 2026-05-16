@@ -77,3 +77,17 @@
 ---
 
 **这些准则在起作用时表现为：** diff 里不必要改动更少、因过度复杂而返工更少，以及澄清问题出现在实现之前而不是犯错之后。
+
+## Skill routing
+
+当用户的请求匹配可用 skill 时，通过 Skill 工具调用它。有疑问时优先调用 skill。
+
+关键路由规则：
+- 产品想法/头脑风暴 → 调用 /gstack-office-hours
+- 策略/范围 → 调用 /gstack-plan-ceo-review
+- 架构规划 → 调用 /gstack-plan-eng-review
+- 设计系统/方案审查 → 调用 /gstack-plan-design-review
+- 完整审查流水线 → 调用 /gstack-plan-eng-review + /gstack-plan-ceo-review
+- Bug/错误 → 调用 /gstack-investigate
+- 代码审查/diff 检查 → 调用 /gstack-review
+- 发布/PR → 调用 /gstack-ship
