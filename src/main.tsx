@@ -10,8 +10,6 @@ import App from './App.tsx'
 import Chat from './pages/Chat.tsx'
 import Profile from './pages/Profile.tsx'
 
-import MyWorld from './pages/MyWorld.tsx'
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
@@ -19,8 +17,6 @@ createRoot(document.getElementById('root')!).render(
         <Route element={<App />}>
           <Route index element={<Chat />} />
           <Route path="profile" element={<Profile />} />
-
-          <Route path="my-world" element={<MyWorld />} />
         </Route>
       </Routes>
     </BrowserRouter>

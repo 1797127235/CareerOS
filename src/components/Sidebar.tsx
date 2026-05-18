@@ -102,22 +102,16 @@ export default function Sidebar() {
         新对话
       </button>
 
-      {/* 我的世界 */}
-      <NavLink
-        to="/my-world"
-        className={({ isActive }) =>
-          `flex items-center gap-xs px-sm py-xs rounded-md text-sm transition-colors ${
-            isActive
-              ? "bg-surface-elevated text-ink"
-              : "text-text-muted hover:bg-surface-elevated hover:text-text"
-          }`
-        }
+      {/* 随记 */}
+      <button
+        onClick={() => window.dispatchEvent(new Event('lumen-open-notes'))}
+        className="flex items-center gap-xs px-sm py-xs rounded-md text-sm text-text-muted hover:bg-surface-elevated hover:text-text transition-colors w-full text-left"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
         </svg>
-        我的世界
-      </NavLink>
+        随记
+      </button>
 
       {/* 对话历史 */}
       <div className="scroll-auto-hide flex min-h-0 flex-1 flex-col gap-xs mt-xs overflow-y-auto">

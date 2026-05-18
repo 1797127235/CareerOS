@@ -2,9 +2,8 @@
 
 from backend.modules.agent.tools.builtin.external import (
     handle_data_source_get_item,
-    handle_data_source_list,
     handle_data_source_search,
-    handle_data_source_status,
+    handle_notes_list,
 )
 from backend.modules.agent.tools.builtin.memory import (
     handle_memory_save,
@@ -17,9 +16,8 @@ from backend.modules.agent.tools.builtin.profile import (
 
 __all__ = [
     "handle_data_source_get_item",
-    "handle_data_source_list",
     "handle_data_source_search",
-    "handle_data_source_status",
+    "handle_notes_list",
     "handle_get_profile",
     "handle_memory_save",
     "handle_memory_search",

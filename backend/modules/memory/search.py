@@ -378,8 +378,7 @@ async def _search_provider(
     """
     results: list[MemoryItem] = []
     try:
-        from backend.modules.data_sources.ingestion import get_document_index_provider
-        from backend.modules.data_sources.ingestion.providers.null import NullProvider
+        from backend.core.vector_store import NullProvider, get_document_index_provider
 
         provider = get_document_index_provider()
         if provider is None or isinstance(provider, NullProvider):

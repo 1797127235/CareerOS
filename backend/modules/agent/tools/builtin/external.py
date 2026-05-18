@@ -1,7 +1,9 @@
-"""数据源读取工具 Handlers — data_source_search / list / get_item / status。"""
+"""数据源读取工具 Handlers — data_source_search / get_item / notes_list。"""
 
 from __future__ import annotations
 
+import contextlib
+import json
 from typing import Any
 
 from sqlalchemy import select, text
@@ -9,14 +11,14 @@ from sqlalchemy import select, text
 from backend.core.db import get_async_session_maker
 from backend.core.logging import get_logger
 from backend.modules.agent.tools.core.context import ToolRuntimeContext
-from backend.modules.data_sources.models import DataSource
+from backend.modules.memory.models import GrowthEvent
 from backend.modules.memory.search import search_all
 
 logger = get_logger(__name__)
 
 
 async def handle_data_source_search(args: dict[str, Any], ctx: ToolRuntimeContext) -> str:
-    """搜索用户已连接的数据源，返回可引用结果。"""
+    """搜索用户记忆中的内容（随记、成长事件等），返回可引用结果。"""
 
     query = args.get("query", "").strip()
     limit = min(int(args.get("limit", 5)), 10)
@@ -25,43 +27,48 @@ async def handle_data_source_search(args: dict[str, Any], ctx: ToolRuntimeContex
 
     results = await search_all(ctx.user_id, query, limit=limit)
     if not results:
-        return "未找到相关外部文档。"
+        return "未找到相关内容。"
 
-    lines = [f"找到 {len(results)} 条数据源结果："]
+    lines = [f"找到 {len(results)} 条相关内容："]
     for idx, item in enumerate(results, 1):
         lines.append(f"\n{idx}. {item.content}")
 
     return "\n".join(lines)
 
 
-async def handle_data_source_list(args: dict[str, Any], ctx: ToolRuntimeContext) -> str:
-    """列出当前用户已连接的数据源。"""
+async def handle_notes_list(args: dict[str, Any], ctx: ToolRuntimeContext) -> str:
+    """列出用户最近的随记。"""
 
+    limit = min(int(args.get("limit", 10)), 50)
     async with get_async_session_maker()() as db:
         rows = (
             (
                 await db.execute(
-                    select(DataSource)
-                    .where(
-                        DataSource.user_id == ctx.user_id,
-                    )
-                    .order_by(DataSource.created_at.desc())
+                    select(GrowthEvent)
+                    .where(GrowthEvent.user_id == ctx.user_id)
+                    .where(GrowthEvent.event_type == "quick_note")
+                    .order_by(GrowthEvent.created_at.desc())
+                    .limit(limit)
                 )
             )
             .scalars()
             .all()
         )
 
-        if not rows:
-            return "当前未连接任何数据源。"
+    if not rows:
+        return "用户目前没有任何随记。"
 
-        lines = [f"已连接 {len(rows)} 个数据源："]
-        for ds in rows:
-            caps = ", ".join(ds.capabilities_json or ["scan"])
-            sync_info = f"last_sync={ds.last_sync_at.isoformat() if ds.last_sync_at else '无'}"
-            error_info = f", error={ds.last_error}" if ds.last_error else ""
-            lines.append(f"- {ds.name}: {ds.status}, type={ds.type}, capabilities=[{caps}], {sync_info}{error_info}")
-        return "\n".join(lines)
+    lines = [f"用户共有 {len(rows)} 条随记（最近 {limit} 条）："]
+    for i, ev in enumerate(rows, 1):
+        payload = {}
+        if ev.payload_json:
+            with contextlib.suppress(json.JSONDecodeError):
+                payload = json.loads(ev.payload_json)
+        content = payload.get("content", "")
+        ts = ev.created_at.strftime("%Y-%m-%d %H:%M") if ev.created_at else "未知时间"
+        lines.append(f"\n{i}. [{ts}] {content}")
+
+    return "\n".join(lines)
 
 
 async def handle_data_source_get_item(args: dict[str, Any], ctx: ToolRuntimeContext) -> str:
@@ -98,35 +105,3 @@ async def handle_data_source_get_item(args: dict[str, Any], ctx: ToolRuntimeCont
             f"索引时间: {indexed_at.isoformat() if indexed_at else '无'}\n"
             f"内容:\n{snippet}{truncated}"
         )
-
-
-async def handle_data_source_status(args: dict[str, Any], ctx: ToolRuntimeContext) -> str:
-    """诊断数据源同步状态。"""
-
-    async with get_async_session_maker()() as db:
-        sources = (await db.execute(select(DataSource).where(DataSource.user_id == ctx.user_id))).scalars().all()
-
-        if not sources:
-            return "当前未配置任何数据源。"
-
-        lines = ["数据源状态诊断："]
-        for ds in sources:
-            # 统计该数据源的文件数
-            count_row = (
-                await db.execute(
-                    text("SELECT COUNT(*) FROM external_items WHERE data_source_id = :dsid AND deleted_at IS NULL"),
-                    {"dsid": ds.id},
-                )
-            ).scalar()
-
-            status_icon = "🟢" if ds.status == "active" else "🟡" if ds.status == "paused" else "🔴"
-            lines.append(
-                f"\n{status_icon} {ds.name} ({ds.type})"
-                f"\n  状态: {ds.status}"
-                f"\n  已索引文档: {count_row or 0}"
-                f"\n  最近同步: {ds.last_sync_at.isoformat() if ds.last_sync_at else '从未同步'}"
-            )
-            if ds.last_error:
-                lines.append(f"  最近错误: {ds.last_error}")
-
-        return "\n".join(lines)

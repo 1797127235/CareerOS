@@ -10,7 +10,7 @@ async def health_check():
     # Provider 状态
     provider_info: dict = {"name": "null", "status": "not_initialized", "type": "disabled"}
     try:
-        from backend.modules.data_sources.ingestion import get_document_index_provider
+        from backend.core.vector_store import get_document_index_provider
 
         provider = get_document_index_provider()
         if provider is not None:

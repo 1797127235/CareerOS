@@ -91,8 +91,7 @@ class ProjectionManager:
         在 commit 后的独立 session 中执行，不影响主事务。
         safe: Provider 不可用（NullProvider / 未安装）时静默跳过。
         """
-        from backend.modules.data_sources.ingestion import get_document_index_provider
-        from backend.modules.data_sources.ingestion.providers.null import NullProvider
+        from backend.core.vector_store import NullProvider, get_document_index_provider
 
         provider = get_document_index_provider()
         if provider is None or isinstance(provider, NullProvider):
@@ -271,7 +270,7 @@ class ProjectionManager:
 
         index_cleared = False
         try:
-            from backend.modules.data_sources.ingestion import get_document_index_provider
+            from backend.core.vector_store import get_document_index_provider
 
             provider = get_document_index_provider()
             if provider is not None:
@@ -285,8 +284,7 @@ class ProjectionManager:
 
 async def _provider_compensation_loop(interval: int) -> None:
     """后台语义索引补偿：定时扫描未同步事件并补同步到 Provider。"""
-    from backend.modules.data_sources.ingestion import get_document_index_provider
-    from backend.modules.data_sources.ingestion.providers.null import NullProvider
+    from backend.core.vector_store import NullProvider, get_document_index_provider
 
     while True:
         try:

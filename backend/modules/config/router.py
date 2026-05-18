@@ -79,7 +79,7 @@ async def get_config() -> ConfigResponse:
     # 获取 provider 状态
     provider_status = "ready"
     try:
-        from backend.modules.data_sources.ingestion import get_document_index_provider
+        from backend.core.vector_store import get_document_index_provider
 
         provider = get_document_index_provider()
         if provider is not None:

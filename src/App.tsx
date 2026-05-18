@@ -3,6 +3,8 @@ import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import { ChatSessionProvider, useChatSession } from './lib/chatSession'
 import Sidebar from './components/Sidebar'
 import Settings from './pages/Settings'
+import QuickNotes from './components/QuickNotes'
+import TitleBar from './components/TitleBar'
 
 function ChatUrlSync() {
   const loc = useLocation()
@@ -29,6 +31,7 @@ function ChatUrlSync() {
 
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(false)
 
   useEffect(() => {
     const handler = () => setSettingsOpen(true)
@@ -36,14 +39,24 @@ export default function App() {
     return () => window.removeEventListener('lumen-open-settings', handler)
   }, [])
 
+  useEffect(() => {
+    const handler = () => setNotesOpen(true)
+    window.addEventListener('lumen-open-notes', handler)
+    return () => window.removeEventListener('lumen-open-notes', handler)
+  }, [])
+
   return (
     <ChatSessionProvider>
       <ChatUrlSync />
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 min-w-0 h-full overflow-y-auto"><Outlet /></main>
+      <div className="flex flex-col h-screen">
+        <TitleBar />
+        <div className="flex flex-1 min-h-0">
+          <Sidebar />
+          <main className="flex-1 min-w-0 h-full overflow-y-auto"><Outlet /></main>
+        </div>
       </div>
       <Settings isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <QuickNotes isOpen={notesOpen} onClose={() => setNotesOpen(false)} />
     </ChatSessionProvider>
   )
 }

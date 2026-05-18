@@ -96,8 +96,7 @@ async def _semantic_dedup_and_merge(
 
     异常处理：LanceDB 不可用或查询失败时，静默返回 None（降级为正常写入）。
     """
-    from backend.modules.data_sources.ingestion import get_document_index_provider
-    from backend.modules.data_sources.ingestion.providers.null import NullProvider
+    from backend.core.vector_store import NullProvider, get_document_index_provider
 
     provider = get_document_index_provider()
     if provider is None or isinstance(provider, NullProvider):
