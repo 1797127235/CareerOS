@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.modules.agent.tools.mcp.config_store import (
+from lib.tools.mcp.config_store import (
     add_mcp_server,
     get_mcp_server,
     load_mcp_servers,
@@ -12,7 +12,7 @@ from backend.modules.agent.tools.mcp.config_store import (
     save_mcp_servers,
     update_mcp_server,
 )
-from backend.modules.agent.tools.mcp.models import McpServerConfig
+from lib.tools.mcp.models import McpServerConfig
 
 
 @pytest.fixture(autouse=True)

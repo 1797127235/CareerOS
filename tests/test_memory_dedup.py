@@ -12,10 +12,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.core.db import Base
-from backend.modules.memory.models import GrowthEvent
-from backend.modules.memory.relational_store import GrowthEventRepository
-from backend.modules.memory.writer import (
+from core.db import Base
+from lib.memory.models import GrowthEvent
+from lib.memory.relational_store import GrowthEventRepository
+from lib.memory.writer import (
     _SEMANTIC_DEDUP_TYPES,
     MemoryWriter,
     _deep_merge_payload,
@@ -124,10 +124,10 @@ class TestSemanticDedupTypes:
 async def test_semantic_dedup_disabled_skips_l2(db):
     """SEMANTIC_DEDUP_ENABLED=False 时，_semantic_dedup_and_merge 不被调用。"""
     writer = MemoryWriter()
-    with patch("backend.core.config.get_settings") as mock_settings:
+    with patch("core.config.get_settings") as mock_settings:
         mock_settings.return_value.semantic_dedup_enabled = False
         mock_settings.return_value.semantic_dedup_default_threshold = 0.85
-        with patch("backend.modules.memory.writer._semantic_dedup_and_merge") as mock_dedup:
+        with patch("lib.memory.writer._semantic_dedup_and_merge") as mock_dedup:
             await writer._write_events(
                 "u1",
                 [{"event_type": "significant_moment", "payload": {"content": "test"}}],
@@ -143,9 +143,9 @@ async def test_semantic_dedup_disabled_skips_l2(db):
 async def test_semantic_dedup_excluded_type(db):
     """reflection_added 不在 _SEMANTIC_DEDUP_TYPES，不触发 L2。"""
     writer = MemoryWriter()
-    with patch("backend.core.config.get_settings") as mock_settings:
+    with patch("core.config.get_settings") as mock_settings:
         mock_settings.return_value.semantic_dedup_enabled = True
-        with patch("backend.modules.memory.writer._semantic_dedup_and_merge") as mock_dedup:
+        with patch("lib.memory.writer._semantic_dedup_and_merge") as mock_dedup:
             await writer._write_events(
                 "u1",
                 [{"event_type": "reflection_added", "payload": {"content": "a reflection"}}],
@@ -160,7 +160,7 @@ async def test_semantic_dedup_excluded_type(db):
 @pytest.mark.asyncio
 async def test_semantic_dedup_lancedb_unavailable(db):
     """provider 为 None 时，_semantic_dedup_and_merge 返回 None，正常写入。"""
-    with patch("backend.modules.data_sources.ingestion.get_document_index_provider", return_value=None):
+    with patch("lib.data_sources.ingestion.get_document_index_provider", return_value=None):
         spec = {"event_type": "significant_moment", "payload": {"content": "test event"}}
         result = await _semantic_dedup_and_merge(spec, "u1", db)
         assert result is None
@@ -175,7 +175,7 @@ async def test_semantic_dedup_no_similar_event(db):
     mock_provider = MagicMock()
     mock_provider.prefetch = AsyncMock(return_value=[])
 
-    with patch("backend.modules.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
+    with patch("lib.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
         spec = {"event_type": "significant_moment", "payload": {"content": "unique event"}}
         result = await _semantic_dedup_and_merge(spec, "u1", db)
         assert result is None
@@ -200,7 +200,7 @@ async def test_semantic_dedup_merges_similar_event(db):
     original_dedupe_key = existing.dedupe_key
 
     # mock provider 命中该事件
-    from backend.modules.data_sources.ingestion.document_index_provider import ProviderHit
+    from lib.data_sources.ingestion.document_index_provider import ProviderHit
 
     mock_hit = ProviderHit(
         doc_id=f"narrative:{existing.id}",
@@ -211,7 +211,7 @@ async def test_semantic_dedup_merges_similar_event(db):
     mock_provider = MagicMock()
     mock_provider.prefetch = AsyncMock(return_value=[mock_hit])
 
-    with patch("backend.modules.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
+    with patch("lib.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
         spec = {
             "event_type": "significant_moment",
             "payload": {"content": "Learning Python is going great", "tags": ["learning", "python"]},
@@ -252,7 +252,7 @@ async def test_semantic_dedup_below_threshold(db):
     existing = await _write_event(db, "significant_moment", {"content": "event A"})
     await db.flush()
 
-    from backend.modules.data_sources.ingestion.document_index_provider import ProviderHit
+    from lib.data_sources.ingestion.document_index_provider import ProviderHit
 
     mock_hit = ProviderHit(
         doc_id=f"narrative:{existing.id}",
@@ -263,7 +263,7 @@ async def test_semantic_dedup_below_threshold(db):
     mock_provider = MagicMock()
     mock_provider.prefetch = AsyncMock(return_value=[mock_hit])
 
-    with patch("backend.modules.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
+    with patch("lib.data_sources.ingestion.get_document_index_provider", return_value=mock_provider):
         spec = {"event_type": "significant_moment", "payload": {"content": "event B"}}
         result = await _semantic_dedup_and_merge(spec, "u1", db)
 
@@ -289,7 +289,7 @@ async def test_l1_dedup_catches_original_dedupe_key(db):
 
     # 再次提交原始 payload（会生成相同的 dedupe_key = original_key）
     repo = GrowthEventRepository(db)
-    from backend.modules.memory.relational_store import _make_dedupe_key, _make_payload_hash
+    from lib.memory.relational_store import _make_dedupe_key, _make_payload_hash
 
     payload = {"content": "original event A"}
     ph = _make_payload_hash(payload)

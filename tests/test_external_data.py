@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from backend.core.db import get_async_session_maker, get_engine, init_db
-from backend.core.migrations import migrate_sqlite
-from backend.modules.data_sources.ingestion import init_pipeline
-from backend.modules.data_sources.ingestion.connectors.local_folder import FilesystemConnector
-from backend.modules.data_sources.ingestion.store import IngestionStore
-from backend.modules.memory.search import _search_external_fts5, _search_external_like
+from core.db import get_async_session_maker, get_engine, init_db
+from core.migrations import migrate_sqlite
+from lib.data_sources.ingestion import init_pipeline
+from lib.data_sources.ingestion.connectors.local_folder import FilesystemConnector
+from lib.data_sources.ingestion.store import IngestionStore
+from lib.memory.search import _search_external_fts5, _search_external_like
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ async def migrated_db():
     """提供已执行过 migrate_sqlite 的内存数据库 session。"""
     init_db("sqlite+aiosqlite:///:memory:")
     engine = get_engine()
-    from backend.core.db import Base
+    from core.db import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -325,7 +325,7 @@ async def test_pipeline_handle_delete(migrated_db) -> None:
 
 async def test_search_all_unified(migrated_db) -> None:
     """search_all 应统一搜索 narrative 事件 + 外部文档，不再区分 source_scope。"""
-    from backend.modules.memory.search import search_all
+    from lib.memory.search import search_all
 
     # 写入一条外部数据
     async with get_async_session_maker()() as db:
@@ -356,7 +356,7 @@ async def test_search_all_unified(migrated_db) -> None:
 @pytest.mark.asyncio
 async def test_search_with_provider(mock_provider) -> None:
     """search_all 应通过 Provider 召回语义搜索结果。"""
-    from backend.modules.memory.search import search_all
+    from lib.memory.search import search_all
 
     results = await search_all(
         "demo_user",

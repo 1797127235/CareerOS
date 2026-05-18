@@ -30,22 +30,22 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Ruff lint
-        run: ruff check backend/
+        run: ruff check core/ lib/ server/ shared/ main.py
 
       - name: Ruff format
-        run: ruff format backend/
+        run: ruff format core/ lib/ server/ shared/ main.py
 
       - name: Ruff format check
-        run: ruff format --check backend/
+        run: ruff format --check core/ lib/ server/ shared/ main.py
 
       - name: Run tests
         run: pytest
 
       - name: Byte-compile backend
-        run: python -m compileall -q backend/
+        run: python -m compileall -q core/ lib/ server/ shared/
 
       - name: Smoke import app
-        run: python -c "from backend.main import app; assert app.title"
+        run: python -c "from main import app; assert app.title"
 
   frontend:
     runs-on: ubuntu-latest

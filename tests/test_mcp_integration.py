@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from backend.modules.agent.tools.core import ToolRegistry, ToolsetResolver
-from backend.modules.agent.tools.core.factory import create_tool_runtime
-from backend.modules.agent.tools.mcp.config_store import save_mcp_servers
-from backend.modules.agent.tools.mcp.tool_bridge import discover_and_register
+from lib.tools.core import ToolRegistry, ToolsetResolver
+from lib.tools.core.factory import create_tool_runtime
+from lib.tools.mcp.config_store import save_mcp_servers
+from lib.tools.mcp.tool_bridge import discover_and_register
 
 
 @pytest.fixture(autouse=True)
 def _clean_mcp_config(monkeypatch):
     """每个测试前清空 MCP 配置并断开连接。"""
     save_mcp_servers([])
-    from backend.modules.agent.tools.mcp.client_manager import _mcp_manager
+    from lib.tools.mcp.client_manager import _mcp_manager
 
     if _mcp_manager is not None:
         pass  # 同步 fixture 中无法安全断开异步连接，依赖测试隔离

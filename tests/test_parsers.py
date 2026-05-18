@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from backend.modules.data_sources.ingestion.connector import RawBytes
-from backend.modules.data_sources.ingestion.parser import (
+from lib.data_sources.ingestion.connector import RawBytes
+from lib.data_sources.ingestion.parser import (
     HTMLParser,
     MarkdownParser,
     PDFParser,

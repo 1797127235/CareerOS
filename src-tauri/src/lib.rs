@@ -143,7 +143,7 @@ fn start_backend() -> Option<Child> {
         .args([
             "-m",
             "uvicorn",
-            "backend.main:app",
+            "main:app",
             "--host",
             "127.0.0.1",
             "--port",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.modules.memory.classifier import (
+from lib.memory.classifier import (
     NARRATIVE_EVENT_TYPES,
     PROFILE_EVENT_TYPES,
     classify,

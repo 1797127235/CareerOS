@@ -8,8 +8,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.db import Base, get_async_session_maker, get_db, init_db
-from backend.main import app
+from core.db import Base, get_async_session_maker, get_db, init_db
+from main import app
 
 # ── 测试用内存数据库 ─────────────────────────────────────
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -19,8 +19,8 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 async def setup_db():
     """测试会话开始时建表，结束时清理"""
     init_db(TEST_DATABASE_URL)
-    from backend.core.db import get_engine
-    from backend.core.migrations import migrate_sqlite
+    from core.db import get_engine
+    from core.migrations import migrate_sqlite
 
     engine = get_engine()
     async with engine.begin() as conn:
@@ -77,7 +77,7 @@ class _MockProvider:
         pass
 
     async def prefetch(self, query: str) -> list:
-        from backend.modules.data_sources.ingestion.document_index_provider import ProviderHit
+        from lib.data_sources.ingestion.document_index_provider import ProviderHit
 
         q = query.lower()
         hits = []
@@ -96,7 +96,7 @@ async def mock_provider():
     import tempfile
     from pathlib import Path
 
-    from backend.modules.data_sources.ingestion.pipeline import init_pipeline
+    from lib.data_sources.ingestion.pipeline import init_pipeline
 
     with tempfile.TemporaryDirectory() as tmpdir:
         provider = _MockProvider()

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from backend.modules.agent.tools.core.context import ToolRuntimeContext
-from backend.modules.agent.tools.core.definitions import ToolDefinition
-from backend.modules.agent.tools.core.policies import (
+from lib.tools.core.context import ToolRuntimeContext
+from lib.tools.core.definitions import ToolDefinition
+from lib.tools.core.policies import (
     ApprovalPolicy,
     BudgetPolicy,
     LoopGuardPolicy,
