@@ -73,11 +73,12 @@ async def stream_chat(
             )
 
             history = load_pydantic_history(conv)
-            history = await _inject_context_frame(history, conv, user_id, user_input)
+            history_with_frame = await _inject_context_frame(history, conv, user_id, user_input)
+            context_frame_msg = history_with_frame[-1] if history_with_frame else None
 
             async for event in agent.run_stream_events(
                 user_input,
-                message_history=history,
+                message_history=history_with_frame,
                 deps=deps,
                 model_settings=ModelSettings(max_tokens=4096),
                 usage_limits=UsageLimits(
@@ -95,7 +96,9 @@ async def stream_chat(
                         yield item
 
             if state.full_content:
-                await persist_turn(db, conv, state, user_id, user_input, agent_generation, deps)
+                await persist_turn(
+                    db, conv, state, user_id, user_input, agent_generation, deps, context_frame_msg=context_frame_msg
+                )
 
     except LockCapacityError:
         yield {"type": "error", "message": "服务繁忙，请稍后重试"}

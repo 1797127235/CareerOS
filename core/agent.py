@@ -119,8 +119,11 @@ class LumenAgent:
         model = self._create_model()
         all_toolsets = [build_pydantic_toolset(assemble_tools())]
 
-        # system prompt 完全静态 — 动态内容（记忆、时间戳）由 service 层注入为 user message，
-        # 保证 KV cache prefix 不随请求变化。
+        from pydantic_ai.capabilities.reinject_system_prompt import ReinjectSystemPrompt
+
+        # system prompt 完全静态 — 动态内容（记忆、时间戳）由 service 层注入为 user message。
+        # ReinjectSystemPrompt：message_history 非空时 PydanticAI 默认跳过 system 注入，
+        # 这个 capability 确保每次请求都带上 system prompt。
         return Agent(
             model=model,
             deps_type=LumenDeps,
@@ -129,6 +132,7 @@ class LumenAgent:
             retries=2,
             end_strategy="graceful",
             toolsets=all_toolsets,
+            capabilities=[ReinjectSystemPrompt()],
         )
 
     @property
