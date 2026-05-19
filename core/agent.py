@@ -11,8 +11,6 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from sqlalchemy.ext.asyncio import AsyncSession  # pyright: ignore[reportMissingImports]
 
 from core.config import get_settings
-from lib.chat.models import Conversation
-from lib.memory import get_memory
 from shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -116,14 +114,14 @@ class LumenAgent:
 
     def create(self) -> Agent[LumenDeps, str]:
         """创建一个新的 PydanticAI Agent 实例。"""
-        from pydantic_ai import Agent, RunContext
-
         from lib.tools.factory import assemble_tools, build_pydantic_toolset
 
         model = self._create_model()
         all_toolsets = [build_pydantic_toolset(assemble_tools())]
 
-        agent = Agent(
+        # system prompt 完全静态 — 动态内容（记忆、时间戳）由 service 层注入为 user message，
+        # 保证 KV cache prefix 不随请求变化。
+        return Agent(
             model=model,
             deps_type=LumenDeps,
             output_type=str,
@@ -132,42 +130,6 @@ class LumenAgent:
             end_strategy="graceful",
             toolsets=all_toolsets,
         )
-
-        @agent.system_prompt
-        async def dynamic_prompt(ctx: RunContext[LumenDeps]) -> str:
-            # system[1]: 记忆上下文 — 5 分钟 TTL 内保持不变，可被 KV cache 命中
-            conversation_summary: str | None = None
-            try:
-                conv = await ctx.deps.db.get(Conversation, ctx.deps.conversation_id)
-                if conv and conv.summary:
-                    conversation_summary = conv.summary
-            except Exception:
-                pass
-
-            memory_instance = get_memory()
-            context = await memory_instance.build_context(
-                ctx.deps.user_id,
-                user_input=ctx.deps.current_user_input,
-                conversation_summary=conversation_summary,
-            )
-
-            if context.strip():
-                ctx.deps.build_context_cache = context
-                return f"\n\n---\n\n# 用户记忆\n\n{context}"
-            return (
-                "\n\n【用户画像为空】用户尚未提供个人信息。"
-                "当用户提供信息时，调用 memory_save 或 update_profile 保存。"
-            )
-
-        @agent.system_prompt
-        async def timestamp_prompt(_ctx: RunContext[LumenDeps]) -> str:
-            # system[2]: 时间戳 — 单独一条 system message，每分钟变化
-            # 拆分后 system[0]+[1] 不受时间戳影响，对话历史可持续命中 cache
-            from datetime import datetime
-
-            return f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}"
-
-        return agent
 
     @property
     def generation(self) -> int:

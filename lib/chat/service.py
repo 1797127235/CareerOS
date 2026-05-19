@@ -73,6 +73,7 @@ async def stream_chat(
             )
 
             history = load_pydantic_history(conv)
+            history = await _inject_context_frame(history, conv, user_id, user_input)
 
             async for event in agent.run_stream_events(
                 user_input,
@@ -126,3 +127,39 @@ async def stream_chat(
         task.add_done_callback(_log_task_error)
 
     yield {"type": "done", "conversation_id": conv.conversation_id, "usage": state.usage_data}
+
+
+async def _inject_context_frame(history: list, conv, user_id: str, user_input: str) -> list:
+    """构建 context frame 并注入为 history 末尾的 user message。
+
+    这样 system prompt 保持完全静态，KV cache prefix 不因记忆或时间戳变化而失效。
+    历史消息（system → ... → last_assistant）可持续命中 cache；
+    只有 context_frame + 当前 user_input 是每次请求的新内容。
+    """
+    from datetime import datetime
+
+    from pydantic_ai.messages import ModelRequest, UserPromptPart  # pyright: ignore[reportMissingImports]
+
+    from lib.memory import get_memory
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    memory_instance = get_memory()
+    try:
+        context = await memory_instance.build_context(
+            user_id,
+            user_input=user_input,
+            conversation_summary=conv.summary if conv.summary else None,
+        )
+    except Exception:
+        context = ""
+
+    parts = [f"当前时间：{timestamp}"]
+    if context.strip():
+        parts.append(f"# 用户记忆\n\n{context}")
+    else:
+        parts.append("【用户画像为空】当用户提供信息时，调用 memory_save 或 update_profile 保存。")
+
+    frame_content = "\n\n".join(parts)
+    frame_msg = ModelRequest(parts=[UserPromptPart(content=frame_content)])  # type: ignore[call-arg]
+    return [*history, frame_msg]
