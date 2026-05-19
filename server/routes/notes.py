@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.memory.facade import get_memory
 from lib.memory.models import GrowthEvent
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/notes", tags=["notes"])

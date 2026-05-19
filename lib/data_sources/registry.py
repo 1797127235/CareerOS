@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from core.logging import get_logger
 from lib.data_sources.ingestion.connector import DataSourceConnector
 from lib.data_sources.ingestion.connectors.local_folder import FilesystemConnector
 from lib.data_sources.models import DataSource
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

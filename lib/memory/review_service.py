@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from core.logging import get_logger
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -36,9 +36,8 @@ async def background_memory_review(
     _update_understanding（主对话的 persist_turn 已处理），避免递归链。
     """
     try:
+        from core.agent import LumenDeps, get_agent
         from core.db import get_async_session_maker
-        from lib.agent.deps import LumenDeps
-        from lib.agent.pydantic_agent import get_agent
 
         async with get_async_session_maker()() as db:
             agent = get_agent()

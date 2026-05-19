@@ -8,10 +8,10 @@ from typing import ClassVar
 from sqlalchemy import distinct, select
 
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.memory.markdown import sync_user_md_projection
 from lib.memory.models import GrowthEvent
 from lib.memory.snapshot import invalidate_cache
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

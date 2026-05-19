@@ -11,13 +11,13 @@ from pathlib import Path
 from sqlalchemy import text
 
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.data_sources.ingestion.connector import DataSourceConnector, RawBytes, StructuredDocument
 from lib.data_sources.ingestion.document_index_provider import DocumentIndexProvider
 from lib.data_sources.ingestion.parser import parse_raw_bytes
 from lib.data_sources.ingestion.providers.null import NullProvider
 from lib.data_sources.ingestion.retry import jittered_sleep
 from lib.data_sources.ingestion.store import IngestionStore
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from core.config import USER_DATA_DIR
-from core.logging import get_logger
 from lib.data_sources.ingestion.document_index_provider import (
     DocumentIndexProvider,
     HealthStatus,
     ProviderHit,
 )
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

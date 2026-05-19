@@ -10,8 +10,8 @@ from typing import Generic, TypeVar
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.logging import get_logger
 from lib.memory.models import GrowthEvent
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

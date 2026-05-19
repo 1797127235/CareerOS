@@ -11,11 +11,11 @@ from sqlalchemy import select
 
 from core.config import USER_DATA_DIR, apply_user_config, get_settings
 from core.db import Base, get_async_session_maker, get_engine, init_db
-from core.logging import get_logger, setup_logging
 from core.migrations import migrate_sqlite
 from lib.data_sources.ingestion import get_pipeline, init_pipeline_async
 from lib.data_sources.models import DataSource
 from lib.data_sources.registry import create_connector
+from shared.logging import get_logger, setup_logging
 
 logger = get_logger(__name__)
 

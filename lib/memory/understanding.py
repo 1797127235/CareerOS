@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.memory.models import GrowthEvent
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -144,9 +144,9 @@ async def _generate_understanding(profile_text: str, existing: str) -> str:
     """
     from pydantic_ai import Agent
 
-    from lib.agent.pydantic_agent import _create_model
+    from core.agent import create_model
 
-    model = _create_model()
+    model = create_model()
 
     system_prompt = """你是一个 AI 伴侣的用户画像专家。基于用户的画像数据（Markdown 格式），生成一段关于用户的综合画像 + 模式洞察。
 

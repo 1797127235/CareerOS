@@ -9,9 +9,9 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.logging import get_logger
 from lib.memory.models import GrowthEvent
 from lib.memory.relational_store import GrowthEventRepository, _make_dedupe_key, _make_payload_hash
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

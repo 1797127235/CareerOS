@@ -8,8 +8,8 @@ import os
 from collections.abc import AsyncIterator, Callable, Coroutine
 from pathlib import Path
 
-from core.logging import get_logger
 from lib.data_sources.ingestion.connector import DataSourceConnector, RawBytes
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

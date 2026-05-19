@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession  # pyright: ignore[reportMissingImports]
 
-from core.logging import get_logger
-from lib.agent.deps import LumenDeps
+from core.agent import LumenDeps
 from lib.agent.models import AgentTrace
 from lib.chat.models import Message
 from lib.chat.session import save_pydantic_history
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -51,7 +51,7 @@ async def persist_turn(
         logger.warning("保存 AI 回复失败 (可能为部分)", conversation_id=conv.conversation_id)
         return False
 
-    from lib.agent.pydantic_agent import get_agent_generation as _get_agent_generation
+    from core.agent import get_agent_generation as _get_agent_generation
 
     if _get_agent_generation() != agent_generation:
         logger.warning(

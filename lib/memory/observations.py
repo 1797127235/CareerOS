@@ -10,12 +10,12 @@ from sqlalchemy import select
 
 from core.config import build_llm_call_params
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.chat.models import Conversation, Message
 from lib.data_sources.models import DataSource
 from lib.data_sources.service import list_data_sources
 from lib.memory.markdown import read_memory
 from lib.memory.models import GrowthEvent
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

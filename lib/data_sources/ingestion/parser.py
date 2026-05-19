@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from core.logging import get_logger
 from lib.data_sources.ingestion.connector import DocumentSection, RawBytes, StructuredDocument
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

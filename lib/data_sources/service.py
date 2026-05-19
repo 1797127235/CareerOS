@@ -8,9 +8,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.logging import get_logger
 from lib.data_sources.models import DataSource
 from lib.data_sources.registry import create_connector
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

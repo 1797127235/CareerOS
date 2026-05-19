@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart  # pyright: ignore[reportMissingImports]
 
-from core.logging import get_logger
 from lib.chat.models import Conversation
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

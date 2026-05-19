@@ -11,8 +11,8 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.logging import get_logger
 from lib.chat.models import Conversation, Message
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 _SUMMARY_WINDOW = 10

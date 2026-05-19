@@ -14,8 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from lib.agent.deps import LumenDeps
-from lib.agent.pydantic_agent import create_agent, get_agent
+from core.agent import LumenDeps, create_agent, get_agent
 
 
 @pytest.fixture

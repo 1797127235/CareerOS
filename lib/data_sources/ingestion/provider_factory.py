@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from core.config import load_user_config
-from core.logging import get_logger
 from lib.data_sources.ingestion.document_index_provider import DocumentIndexProvider
 from lib.data_sources.ingestion.providers.null import NullProvider
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

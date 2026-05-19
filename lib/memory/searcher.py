@@ -6,11 +6,11 @@ import re as _re
 from datetime import UTC, datetime, timedelta
 
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.memory.classifier import NARRATIVE_EVENT_TYPES, PROFILE_EVENT_TYPES
 from lib.memory.models import GrowthEvent
 from lib.memory.search import MemoryItem, search_all
 from lib.memory.snapshot import build_snapshot
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -9,10 +9,10 @@ from typing import Any
 
 from mcp import ClientSession
 
-from core.logging import get_logger
 from lib.tools.mcp.config_store import load_mcp_servers
 from lib.tools.mcp.models import McpServerConfig, McpServerStatus
 from lib.tools.mcp.transport import create_sse_transport, create_stdio_transport
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

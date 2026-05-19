@@ -12,9 +12,9 @@ from sqlalchemy import func, select  # pyright: ignore[reportMissingImports]
 from sqlalchemy.ext.asyncio import AsyncSession  # pyright: ignore[reportMissingImports]
 
 from core.db import get_db
-from core.logging import get_logger
 from lib.chat.models import Conversation, Message
 from lib.chat.service import stream_chat
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

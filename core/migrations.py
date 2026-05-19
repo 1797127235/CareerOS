@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from core.logging import get_logger
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.logging import get_logger
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

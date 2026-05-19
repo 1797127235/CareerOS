@@ -9,12 +9,11 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
-from core.logging import get_logger
-from lib.agent.deps import LumenDeps
+from core.agent import LumenDeps, get_agent, get_agent_generation
 from lib.agent.event_handlers import EVENT_HANDLERS
-from lib.agent.pydantic_agent import get_agent, get_agent_generation
 from lib.chat.persistence import _log_task_error, persist_turn, save_user_message
 from lib.chat.session import ensure_conversation, load_pydantic_history
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 

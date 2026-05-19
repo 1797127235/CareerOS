@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import USER_DATA_DIR
 from core.db import get_async_session_maker
-from core.logging import get_logger
 from lib.memory.events_merger import (
     deep_merge,
     generate_memory_md,
@@ -24,6 +23,7 @@ from lib.memory.events_merger import (
     merge_profile_events,
 )
 from lib.memory.models import GrowthEvent
+from shared.logging import get_logger
 
 logger = get_logger(__name__)
 
